@@ -1,23 +1,19 @@
 using Discord;
 using Discord.WebSocket;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
-using Stripe;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
-using WorkerService1.Discord.Services;
+using System.Collections.Concurrent;
 
 namespace WorkerService1.Discord.Services
 {
     public class ProductNotificationService
     {
+        private static readonly ConcurrentDictionary<string, CancellationTokenSource> _pendingCreations = new();
+        private static readonly ConcurrentDictionary<string, CancellationTokenSource> _pendingUpdates = new();
+        private static readonly ConcurrentDictionary<string, CancellationTokenSource> _pendingDeletions = new();
+        
         private readonly ILogger<ProductNotificationService> _logger;
         private readonly IConfiguration _configuration;
         private readonly DiscordSocketClient _client;
-
 
         public ProductNotificationService(ILogger<ProductNotificationService> logger, IConfiguration configuration, DiscordSocketClient client)
         {
@@ -25,12 +21,82 @@ namespace WorkerService1.Discord.Services
             _configuration = configuration;
             _client = client;
         }
-        
-        // Métodos de atalho para clareza no StripeWebhookService
-        public Task HandleProductCreated(Stripe.Product product) => ProcessProductEvent(product, "created");
-        public Task HandleProductDeleted(Stripe.Product product) => ProcessProductEvent(product, "deleted");
-        public Task HandleProductUpdated(Stripe.Product product) => ProcessProductEvent(product, !product.Active ? "archived" : "reactivated");
 
+        public Task HandleProductCreated(Stripe.Product product)
+        {
+            _logger.LogInformation($"Evento CREATED recebido para {product.Id}. Tem prioridade sobre 'updated'.");
+            
+            // Cancela qualquer notificação de 'updated' que possa ter chegado antes por engano.
+            if (_pendingUpdates.TryRemove(product.Id, out var cts))
+            {
+                _logger.LogWarning($"Cancelando notificação de 'updated' pendente para dar lugar à de 'created'.");
+                cts.Cancel();
+            }
+
+            // Inicia a notificação de 'created' (que agora não será cancelada por um 'updated').
+            return StartDelayedNotification(product, "created", TimeSpan.FromSeconds(5), _pendingCreations);
+        }
+
+        public Task HandleProductDeleted(Stripe.Product product)
+        {
+            _logger.LogInformation($"Evento DELETED recebido para {product.Id}. Tem prioridade máxima.");
+
+            // Cancela QUALQUER notificação pendente (created ou updated).
+            if (_pendingUpdates.TryRemove(product.Id, out var cts2)) cts2.Cancel();
+
+            // AGORA, em vez de agir imediatamente, ele também inicia a espera de 5 segundos.
+            return StartDelayedNotification(product, "deleted", TimeSpan.FromSeconds(5), _pendingDeletions);
+        }
+
+        public Task HandleProductUpdated(Stripe.Product product)
+        {
+            // --- LÓGICA DE PRIORIDADE ---
+            // Se uma notificação de 'created' já está na fila, este 'updated' é provavelmente
+            // uma edição rápida e deve ser IGNORADO para não cancelar a mensagem de criação.
+            if (_pendingCreations.ContainsKey(product.Id))
+            {
+                _logger.LogInformation($"Ignorando evento 'updated' para {product.Id} porque uma notificação de 'created' já está pendente.");
+                return Task.CompletedTask;
+            }
+
+            var eventType = !product.Active ? "archived" : "updated";
+            return StartDelayedNotification(product, eventType, TimeSpan.FromSeconds(5), _pendingUpdates);
+        }
+
+        private Task StartDelayedNotification(Stripe.Product product, string eventType, TimeSpan delay, ConcurrentDictionary<string, CancellationTokenSource> pendingDictionary)
+        {
+            _logger.LogInformation($"Iniciando espera de {delay.TotalSeconds}s para o evento '{eventType}' do produto {product.Id}.");
+
+            var cts = new CancellationTokenSource();
+            
+            // Cancela qualquer tarefa antiga DO MESMO TIPO e adiciona a nova
+            if (pendingDictionary.TryGetValue(product.Id, out var oldCts))
+            {
+                oldCts.Cancel();
+            }
+            pendingDictionary[product.Id] = cts;
+
+            Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(delay, cts.Token);
+                    _logger.LogInformation($"Tempo de espera para '{eventType}' ({product.Id}) expirou. Processando...");
+                    await ProcessProductEvent(product, eventType);
+                }
+                catch (TaskCanceledException)
+                {
+                    _logger.LogInformation($"A notificação de '{eventType}' para {product.Id} foi cancelada.");
+                }
+                finally
+                {
+                    pendingDictionary.TryRemove(new KeyValuePair<string, CancellationTokenSource>(product.Id, cts));
+                }
+            });
+
+            return Task.CompletedTask;
+        }
+        
         private async Task ProcessProductEvent(Stripe.Product product, string eventType)
         {
             _logger.LogInformation($"Processando evento de produto '{eventType}' para: {product.Name}");
@@ -97,7 +163,7 @@ namespace WorkerService1.Discord.Services
                 "created" => ("🆕 Novo Produto Criado no Stripe!", Color.Green),
                 "deleted" => ("🗑️ Produto Deletado no Stripe!", Color.Red),
                 "archived" => ("📦 Produto Arquivado no Stripe!", Color.Orange),
-                "reactivated" => ("♻️ Produto Reativado no Stripe!", Color.Blue),
+                "updated" => ("📝 Produto Atualizado no Stripe!", Color.Blue),
                 _ => ("📝 Produto Atualizado no Stripe!", Color.Gold)
             };
 

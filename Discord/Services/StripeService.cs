@@ -64,11 +64,17 @@ namespace WorkerService1.Discord.Services
         public async Task<List<Stripe.Price>> GetActivePlansAsync()
         {
             _logger.LogInformation("Buscando planos ativos do Stripe...");
-            var options = new Stripe.PriceListOptions { Active = true, Limit = 100 };
+            var options = new Stripe.PriceListOptions
+            {
+                Active = true,
+                Limit = 100,
+                // --- ADICIONE ESTA LINHA ---
+                // Pede ao Stripe para incluir o objeto completo do Produto em cada Preço
+                Expand = new List<string> { "data.product" }
+            };
             var prices = await new Stripe.PriceService().ListAsync(options);
             _logger.LogInformation("{Count} planos ativos encontrados.", prices.Data.Count);
             return prices.Data.ToList();
         }
-        
     }
 }

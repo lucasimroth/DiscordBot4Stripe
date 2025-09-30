@@ -39,7 +39,7 @@ namespace Workerservice1.Controller
             try
             {
                 var stripeEvent = EventUtility.ConstructEvent(json, Request.Headers["Stripe-Signature"], _webhookSecret);
-                _logger.LogInformation($"Evento do Stripe recebido: {stripeEvent.Type}");
+                _logger.LogWarning(">>> Evento Stripe Recebido: {EventType} às {Timestamp:O}", stripeEvent.Type, DateTime.UtcNow);
                 await _webhookService.ProcessWebhookEventAsync(stripeEvent);
                 return Ok();
             }

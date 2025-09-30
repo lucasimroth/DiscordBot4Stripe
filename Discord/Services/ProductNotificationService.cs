@@ -103,7 +103,7 @@ namespace WorkerService1.Discord.Services
             try
             {
                 var activePlans = await GetActivePlans();
-                await SendActivePlansToDiscord(activePlans, product, eventType);
+                await SendActivePlansToDiscord(product, eventType);
             }
             catch (Exception ex)
             {
@@ -121,7 +121,7 @@ namespace WorkerService1.Discord.Services
         }
 
         // --- MÉTODO PREENCHIDO COM A LÓGICA E OS LOGS ---
-        private async Task SendActivePlansToDiscord(List<Stripe.Price> activePlans, Stripe.Product product, string eventType)
+        private async Task SendActivePlansToDiscord( Stripe.Product product, string eventType)
         {
             _logger.LogInformation("Preparando para enviar mensagem de notificação para o Discord...");
             
@@ -229,12 +229,6 @@ namespace WorkerService1.Discord.Services
             {
                 _logger.LogError(ex, "!!! FALHA AO ENVIAR MENSAGEM PARA O DISCORD !!! Causa provável: O bot não tem permissão para 'Enviar Mensagens' ou 'Anexar Links' neste canal.");
             }
-        }
-        
-        private string GetPlanMappingName(string priceId)
-        {
-            var planMappingSection = _configuration.GetSection("PlanMapping");
-            return planMappingSection.GetChildren().FirstOrDefault(x => x.Value == priceId)?.Key ?? string.Empty;
         }
     }
 }

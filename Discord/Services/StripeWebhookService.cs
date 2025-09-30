@@ -1,5 +1,4 @@
 using Stripe;
-using Microsoft.Extensions.Logging;
 
 namespace WorkerService1.Discord.Services
 {
@@ -25,16 +24,16 @@ namespace WorkerService1.Discord.Services
                     if (stripeEvent.Data.Object is Stripe.Checkout.Session s1) await _subscriptionService.HandleCheckoutSessionCompleted(s1);
                     break;
                 case "customer.subscription.deleted":
-                    if (stripeEvent.Data.Object is Stripe.Subscription s2) await _subscriptionService.HandleSubscriptionDeleted(s2);
+                    if (stripeEvent.Data.Object is Subscription s2) await _subscriptionService.HandleSubscriptionDeleted(s2);
                     break;
                 case "product.created":
-                    if (stripeEvent.Data.Object is Stripe.Product p1) await _productNotificationService.HandleProductCreated(p1);
+                    if (stripeEvent.Data.Object is Product p1) await _productNotificationService.HandleProductCreated(p1);
                     break;
                 case "product.deleted":
-                    if (stripeEvent.Data.Object is Stripe.Product p2) await _productNotificationService.HandleProductDeleted(p2);
+                    if (stripeEvent.Data.Object is Product p2) await _productNotificationService.HandleProductDeleted(p2);
                     break;
                 case "product.updated":
-                    if (stripeEvent.Data.Object is Stripe.Product p3) await _productNotificationService.HandleProductUpdated(p3);
+                    if (stripeEvent.Data.Object is Product p3) await _productNotificationService.HandleProductUpdated(p3);
                     break;
             }
         }

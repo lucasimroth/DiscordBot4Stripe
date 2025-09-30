@@ -1,11 +1,7 @@
-using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
-using System;
 using System.Reflection;
-using System.Threading.Tasks;
+
 
 namespace WorkerService1.Discord.Handlers
 {
@@ -36,7 +32,6 @@ namespace WorkerService1.Discord.Handlers
 
             // Escuta quando o bot estiver pronto para registrar os comandos
             _client.Ready += OnClientReady;
-            _client.InteractionCreated += OnInteractionCreatedAsync;
         }
 
         private async Task OnClientReady()
@@ -73,22 +68,5 @@ namespace WorkerService1.Discord.Handlers
             }
         }
         
-        private async Task OnInteractionCreatedAsync(SocketInteraction interaction)
-        {
-            try
-            {
-                var context = new SocketInteractionContext(_client, interaction);
-                var result = await _commands.ExecuteCommandAsync(context, _services);
-
-                if (!result.IsSuccess)
-                {
-                    _logger.LogError($"Erro ao executar comando: {result.ErrorReason}");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Erro ao processar interação");
-            }
-        }
     }
 }

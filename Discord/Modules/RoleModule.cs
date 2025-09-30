@@ -1,7 +1,6 @@
 using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
-using System.Threading.Tasks;
 
 namespace WorkerService1.Discord.Modules
 {

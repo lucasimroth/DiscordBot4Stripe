@@ -1,9 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
 using Stripe;
-using System.IO;
-using System.Threading.Tasks;
 using WorkerService1.Discord.Services;
 
 namespace Workerservice1.Controller
@@ -55,7 +51,7 @@ namespace Workerservice1.Controller
         [HttpGet("test-product-created")]
         public async Task<IActionResult> TestProductCreated()
         {
-            var testProduct = new Stripe.Product { Id = "test_prod_1", Name = "Produto Teste Criado" };
+            var testProduct = new Product { Id = "test_prod_1", Name = "Produto Teste Criado" };
             await _productNotificationService.HandleProductCreated(testProduct);
             return Ok("Teste de criação de produto executado.");
         }

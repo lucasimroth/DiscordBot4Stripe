@@ -1,8 +1,5 @@
 using Discord;
 using Discord.Interactions;
-using Microsoft.Extensions.Logging;
-using System;
-using System.Threading.Tasks;
 using WorkerService1.Discord.Services; // Importa o nosso novo serviço
 
 namespace WorkerService1.Discord.Modules

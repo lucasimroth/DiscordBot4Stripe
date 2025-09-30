@@ -1,10 +1,6 @@
 using Discord;
 using Discord.Interactions;
-using Microsoft.Extensions.Logging;
-using System;
-using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
 using WorkerService1.Discord.Services; // Importa o StripeService
 
 namespace WorkerService1.Discord.Modules
@@ -94,12 +90,6 @@ namespace WorkerService1.Discord.Modules
                 _logger.LogError(ex, "Erro ao executar o comando /listar-planos.");
                 await FollowupAsync("Ocorreu um erro ao buscar os planos do Stripe. Verifique os logs.");
             }
-        }
-        
-        private string GetPlanMappingName(string priceId)
-        {
-            var planMappingSection = _configuration.GetSection("PlanMapping");
-            return planMappingSection.GetChildren().FirstOrDefault(x => x.Value == priceId)?.Key ?? string.Empty;
         }
     }
 }

@@ -1,9 +1,6 @@
 using Discord;
 using Discord.Interactions;
-using Discord.WebSocket;
-using System; // Adicionado para a conversão de cores
 using System.Globalization; // Adicionado para a conversão de cores
-using System.Threading.Tasks;
 
 
 namespace WorkerService1.Discord.Modules

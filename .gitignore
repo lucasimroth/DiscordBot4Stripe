@@ -1,0 +1,39 @@
+# Arquivo .gitignore padrão da comunidade .NET, adaptado para o seu projeto.
+
+## Pastas de Configuração da IDE (Rider / Visual Studio)
+.idea/
+.vs/
+
+## Pastas de Compilação e Binários (Geradas Automaticamente)
+[Bb]in/
+[Oo]bj/
+
+## Arquivos de Log, Cache e Temporários
+*.log
+*.DS_Store
+*.tmp
+
+
+# ----------------------------------------------------
+# ARQUIVOS ESPECÍFICOS DO SEU PROJETO PARA IGNORAR
+# ----------------------------------------------------
+
+# 1. BANCO DE DADOS
+# Nunca adicione arquivos de banco de dados ao Git!
+*.db
+*.db-journal
+
+# 2. ARQUIVO DE SEGREDOS (.env)
+# CRÍTICO: Nunca adicione seus tokens e chaves secretas ao Git!
+.env
+
+# 3. CONFIGURAÇÕES LOCAIS DE DESENVOLVIMENTO
+# Contém configurações específicas da sua máquina.
+Properties/launchSettings.json
+appsettings.Development.json
+appsettings.json
+
+# 4. ARQUIVOS DE USUÁRIO DA IDE
+# Salva configurações de janela, breakpoints, etc.
+*.suo
+*.user

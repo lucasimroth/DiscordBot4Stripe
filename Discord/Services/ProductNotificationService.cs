@@ -10,12 +10,13 @@ namespace WorkerService1.Discord.Services
         private static readonly ConcurrentDictionary<string, CancellationTokenSource> _pendingCreations = new();
         private static readonly ConcurrentDictionary<string, CancellationTokenSource> _pendingUpdates = new();
         private static readonly ConcurrentDictionary<string, CancellationTokenSource> _pendingDeletions = new();
-        
+
         private readonly ILogger<ProductNotificationService> _logger;
         private readonly IConfiguration _configuration;
         private readonly DiscordSocketClient _client;
 
-        public ProductNotificationService(ILogger<ProductNotificationService> logger, IConfiguration configuration, DiscordSocketClient client)
+        public ProductNotificationService(ILogger<ProductNotificationService> logger, IConfiguration configuration,
+            DiscordSocketClient client)
         {
             _logger = logger;
             _configuration = configuration;
@@ -25,7 +26,7 @@ namespace WorkerService1.Discord.Services
         public Task HandleProductCreated(Stripe.Product product)
         {
             _logger.LogInformation($"Evento CREATED recebido para {product.Id}. Tem prioridade sobre 'updated'.");
-            
+
             // Cancela qualquer notificação de 'updated' que possa ter chegado antes por engano.
             if (_pendingUpdates.TryRemove(product.Id, out var cts))
             {
@@ -55,7 +56,8 @@ namespace WorkerService1.Discord.Services
             // uma edição rápida e deve ser IGNORADO para não cancelar a mensagem de criação.
             if (_pendingCreations.ContainsKey(product.Id))
             {
-                _logger.LogInformation($"Ignorando evento 'updated' para {product.Id} porque uma notificação de 'created' já está pendente.");
+                _logger.LogInformation(
+                    $"Ignorando evento 'updated' para {product.Id} porque uma notificação de 'created' já está pendente.");
                 return Task.CompletedTask;
             }
 
@@ -63,17 +65,20 @@ namespace WorkerService1.Discord.Services
             return StartDelayedNotification(product, eventType, TimeSpan.FromSeconds(5), _pendingUpdates);
         }
 
-        private Task StartDelayedNotification(Stripe.Product product, string eventType, TimeSpan delay, ConcurrentDictionary<string, CancellationTokenSource> pendingDictionary)
+        private Task StartDelayedNotification(Stripe.Product product, string eventType, TimeSpan delay,
+            ConcurrentDictionary<string, CancellationTokenSource> pendingDictionary)
         {
-            _logger.LogInformation($"Iniciando espera de {delay.TotalSeconds}s para o evento '{eventType}' do produto {product.Id}.");
+            _logger.LogInformation(
+                $"Iniciando espera de {delay.TotalSeconds}s para o evento '{eventType}' do produto {product.Id}.");
 
             var cts = new CancellationTokenSource();
-            
+
             // Cancela qualquer tarefa antiga DO MESMO TIPO e adiciona a nova
             if (pendingDictionary.TryGetValue(product.Id, out var oldCts))
             {
                 oldCts.Cancel();
             }
+
             pendingDictionary[product.Id] = cts;
 
             Task.Run(async () =>
@@ -81,7 +86,8 @@ namespace WorkerService1.Discord.Services
                 try
                 {
                     await Task.Delay(delay, cts.Token);
-                    _logger.LogInformation($"Tempo de espera para '{eventType}' ({product.Id}) expirou. Processando...");
+                    _logger.LogInformation(
+                        $"Tempo de espera para '{eventType}' ({product.Id}) expirou. Processando...");
                     await ProcessProductEvent(product, eventType);
                 }
                 catch (TaskCanceledException)
@@ -96,7 +102,7 @@ namespace WorkerService1.Discord.Services
 
             return Task.CompletedTask;
         }
-        
+
         private async Task ProcessProductEvent(Stripe.Product product, string eventType)
         {
             _logger.LogInformation($"Processando evento de produto '{eventType}' para: {product.Name}");
@@ -121,10 +127,10 @@ namespace WorkerService1.Discord.Services
         }
 
         // --- MÉTODO PREENCHIDO COM A LÓGICA E OS LOGS ---
-        private async Task SendActivePlansToDiscord( Stripe.Product product, string eventType)
+        private async Task SendActivePlansToDiscord(Stripe.Product product, string eventType)
         {
             _logger.LogInformation("Preparando para enviar mensagem de notificação para o Discord...");
-            
+
             // --- VERIFICAÇÕES ---
             var channelIdStr = "1420206249508601857"; // Canal de Notificações, verifique se este ID está correto.
             if (!ulong.TryParse(channelIdStr, out var channelId))
@@ -139,23 +145,27 @@ namespace WorkerService1.Discord.Services
                 _logger.LogError("DiscordGuildId não configurado ou é inválido.");
                 return;
             }
-            _logger.LogInformation("Configurações de Guild ID ({guildId}) e Channel ID ({channelId}) lidas.", guildId, channelId);
+
+            _logger.LogInformation("Configurações de Guild ID ({guildId}) e Channel ID ({channelId}) lidas.", guildId,
+                channelId);
 
             var guild = _client?.GetGuild(guildId);
             if (guild == null)
             {
-                _logger.LogError("Não foi possível encontrar o Servidor (Guild) com o ID: {GuildId}. Verifique se o bot está no servidor.", guildId);
+                _logger.LogError(
+                    "Não foi possível encontrar o Servidor (Guild) com o ID: {GuildId}. Verifique se o bot está no servidor.",
+                    guildId);
                 return;
             }
+
             _logger.LogInformation("Servidor (Guild) '{GuildName}' encontrado.", guild.Name);
 
             var channel = guild.GetTextChannel(channelId);
             if (channel == null)
             {
-                _logger.LogError("Não foi possível encontrar o Canal de Texto com o ID: {ChannelId} no servidor {GuildName}", channelId, guild.Name);
+                /* ... */
                 return;
             }
-            _logger.LogInformation("Canal de destino '#{ChannelName}' encontrado.", channel.Name);
 
             // --- LÓGICA DO EMBED ---
             var (title, color) = eventType switch
@@ -173,61 +183,43 @@ namespace WorkerService1.Discord.Services
                 .WithColor(color)
                 .WithCurrentTimestamp()
                 .WithFooter($"ID do Produto: {product.Id}");
-            
-            // 1. Crie um StringBuilder para montar a seção de detalhes.
+
+            // --- LÓGICA DE DETALHES CORRIGIDA ---
             var details = new StringBuilder();
-            details.AppendLine("\n");
-            // 2. Verifique e adicione cada metadado, um por um.
-            if (product.Metadata.TryGetValue("> aventura", out var aventura))
-            {
+
+            // Primeiro, busca todos os metadados
+            if (product.Metadata.TryGetValue("aventura", out var aventura))
                 details.AppendLine($"> **Aventura:** {aventura}");
-            }
-            if (product.Metadata.TryGetValue("> mestre", out var mestre))
-            {
-                details.AppendLine($"> **Mestre:** {mestre}");
-            }
-            if (product.Metadata.TryGetValue("> vagas", out var vagas))
-            {
+            if (product.Metadata.TryGetValue("mestre", out var mestre)) details.AppendLine($"> **Mestre:** {mestre}");
+            if (product.Metadata.TryGetValue("vagas", out var vagas))
                 details.AppendLine($"> **Vagas Disponíveis:** {vagas}");
-            }
-            if (product.Metadata.TryGetValue("> horas", out var horas))
-            {
-                details.AppendLine($"> **Duração:** {horas}");
-            }
-            if (product.Metadata.TryGetValue("> horario", out var horario))
-            {
+            if (product.Metadata.TryGetValue("horas", out var horas)) details.AppendLine($"> **Duração:** {horas}");
+            if (product.Metadata.TryGetValue("horario", out var horario))
                 details.AppendLine($"> **Horário:** {horario}");
-            }
-
-            // 3. Adicione a descrição do produto (campo padrão do Stripe)
             if (!string.IsNullOrEmpty(product.Description))
-            {
-                details.AppendLine($"\n> **Descrição:**\n{product.Description}");
-            }
+                details.AppendLine($"\n> **Descrição:**\n> {product.Description.Replace("\n", "\n> ")}");
 
-            // 4. Se encontramos algum detalhe, adicionamos o campo ao embed.
+            // SÓ ADICIONA O CAMPO SE A STRING 'details' TIVER ALGUM CONTEÚDO REAL
             if (details.Length > 0)
             {
                 embedBuilder.AddField("📋 Detalhes", details.ToString());
             }
-            
-            // 1. Verificamos se a lista de imagens não está vazia.
+            // --- FIM DA CORREÇÃO ---
+
             if (product.Images.Any())
             {
-                // 2. Pegamos a primeira imagem da lista e a usamos como a imagem principal do Embed.
                 embedBuilder.WithImageUrl(product.Images.First());
             }
 
             // --- ENVIO DA MENSAGEM ---
             try
             {
-                _logger.LogInformation("Enviando a mensagem para o Discord...");
                 await channel.SendMessageAsync(embed: embedBuilder.Build());
-                _logger.LogInformation("SUCESSO! Mensagem de notificação enviada para o canal #{ChannelName}.", channel.Name);
+                _logger.LogInformation("SUCESSO! Mensagem de notificação enviada...");
             }
-            catch(Exception ex)
+            catch (Exception ex)
             {
-                _logger.LogError(ex, "!!! FALHA AO ENVIAR MENSAGEM PARA O DISCORD !!! Causa provável: O bot não tem permissão para 'Enviar Mensagens' ou 'Anexar Links' neste canal.");
+                _logger.LogError(ex, "!!! FALHA AO ENVIAR MENSAGEM PARA O DISCORD !!!");
             }
         }
     }

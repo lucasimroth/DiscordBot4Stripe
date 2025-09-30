@@ -10,6 +10,7 @@ using WorkerService1.Discord.Modules;
 using WorkerService1.Discord.Handlers;
 using WorkerService1.Discord.Services;
 using WorkerService1.Data;
+using WorkerService1.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -38,6 +39,8 @@ builder.Services.AddScoped<StripeService>();
 builder.Services.AddScoped<WorkerService1.Discord.Services.SubscriptionService>();
 builder.Services.AddScoped<ProductNotificationService>();
 builder.Services.AddScoped<StripeWebhookService>();
+builder.Services.AddScoped<DiscordInfraService>();
+
 
 //3.
 builder.Services.AddSingleton<DiscordBotService>();

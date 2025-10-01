@@ -43,10 +43,10 @@ namespace WorkerService1.Discord.Services
                 return;
             }
 
-            var guildIdStr = _configuration["DiscordGuildId"];
+            var guildIdStr = _configuration["Discord:GuildId"];
             if (!ulong.TryParse(guildIdStr, out var guildId))
             {
-                _logger.LogError("DiscordGuildId não configurado ou inválido");
+                _logger.LogError("Discord:GuildId não configurado ou inválido");
                 return;
             }
             
@@ -120,16 +120,10 @@ namespace WorkerService1.Discord.Services
             // ... (resto da sua lógica para remover o cargo e a entrada no DB) ...
             var priceId = subscription.Items.Data[0].Price.Id;
             var roleIdStr = _configuration.GetValue<string>($"RoleMapping:{priceId}");
-            if (string.IsNullOrEmpty(roleIdStr) || !ulong.TryParse(roleIdStr, out var roleId)) { 
-                _logger.LogWarning($"Role ID não encontrado para o price {priceId}");
-                return; 
-            }
-            var guildIdStr = _configuration["DiscordGuildId"];
-            if (string.IsNullOrEmpty(guildIdStr) || !ulong.TryParse(guildIdStr, out var guildId)) 
-            {
-                _logger.LogError("DiscordGuildId não configurado ou inválido");
-                return;
-            }
+
+            if (!ulong.TryParse(roleIdStr, out var roleId)) return;
+            var guildIdStr = _configuration["Discord:GuildId"];
+            if (!ulong.TryParse(guildIdStr, out var guildId)) return;
 
             var guild = _client.GetGuild(guildId);
             var user = guild?.GetUser(userSubscription.DiscordUserId);

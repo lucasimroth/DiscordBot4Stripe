@@ -33,7 +33,7 @@ namespace Workerservice1.Controller
             var json = await new StreamReader(HttpContext.Request.Body).ReadToEndAsync();
             try
             {
-                var stripeEvent = EventUtility.ConstructEvent(json, Request.Headers["Stripe-Signature"], _webhookSecret);
+                var stripeEvent = EventUtility.ConstructEvent(json, Request.Headers["Stripe-Signature"], _webhookSecret, throwOnApiVersionMismatch: false);
                 _logger.LogWarning(">>> Evento Stripe Recebido: {EventType} às {Timestamp:O}", stripeEvent.Type, DateTime.UtcNow);
                 await _webhookService.ProcessWebhookEventAsync(stripeEvent);
                 return Ok();

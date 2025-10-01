@@ -35,6 +35,8 @@ builder.Services.AddSingleton(x => new InteractionService(x.GetRequiredService<D
 builder.Services.AddSingleton<CommandHandler>();
 builder.Services.AddSingleton<DiscordEventHandler>();
 builder.Services.AddSingleton<WelcomeModule>();
+builder.Services.AddScoped<WorkerService1.Discord.Modules.ComprarCommandModule>();
+builder.Services.AddScoped<WorkerService1.Discord.Modules.PlanosCommandModule>();
 builder.Services.AddScoped<StripeService>();
 builder.Services.AddScoped<WorkerService1.Discord.Services.SubscriptionService>();
 builder.Services.AddScoped<ProductNotificationService>();

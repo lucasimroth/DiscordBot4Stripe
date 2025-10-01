@@ -31,25 +31,56 @@ namespace WorkerService1.Discord.Modules
 
         try
         {
-            // Buscar todos os produtos ativos com preços expandidos
-            var productService = new Stripe.ProductService();
-            var products = await productService.ListAsync(new Stripe.ProductListOptions
-            {
-                Active = true,
-                Limit = 100,
-                Expand = new List<string> { "data.default_price" }
-            });
+            // Buscar produtos que estão mapeados no banco de dados
+            var mappedProducts = await _dbContext.PlanMappings
+                .ToListAsync();
 
-            if (!products.Data.Any())
+            if (!mappedProducts.Any())
             {
-                await FollowupAsync("❌ Nenhum plano disponível no momento.", ephemeral: true);
+                await FollowupAsync("❌ Nenhum plano mapeado disponível no momento.", ephemeral: true);
+                return;
+            }
+
+            // Buscar informações dos produtos no Stripe
+            var productService = new Stripe.ProductService();
+            var priceService = new Stripe.PriceService();
+            var products = new List<Stripe.Product>();
+            var prices = new List<Stripe.Price>();
+
+            foreach (var mapping in mappedProducts)
+            {
+                try
+                {
+                    // Buscar o preço
+                    var price = await priceService.GetAsync(mapping.StripePriceId);
+                    if (price != null && price.Active)
+                    {
+                        prices.Add(price);
+                        
+                        // Buscar o produto
+                        var product = await productService.GetAsync(price.ProductId);
+                        if (product != null && product.Active)
+                        {
+                            products.Add(product);
+                        }
+                    }
+                }
+                catch (StripeException ex)
+                {
+                    _logger.LogWarning(ex, "Erro ao buscar produto/preço para mapping {Slug}", mapping.Slug);
+                }
+            }
+
+            if (!products.Any())
+            {
+                await FollowupAsync("❌ Nenhum plano ativo encontrado no Stripe.", ephemeral: true);
                 return;
             }
 
             // Enviar mensagem inicial
             var embedInicial = new EmbedBuilder()
                 .WithTitle("📋 Planos Disponíveis")
-                .WithDescription($"**{products.Data.Count}** planos ativos encontrados. Enviando lista completa...")
+                .WithDescription($"**{products.Count}** planos ativos encontrados. Enviando lista completa...")
                 .WithColor(Color.Blue)
                 .WithTimestamp(DateTimeOffset.Now)
                 .Build();
@@ -57,7 +88,7 @@ namespace WorkerService1.Discord.Modules
             await FollowupAsync(embed: embedInicial, ephemeral: true);
 
             // Processar todos os produtos em lotes de 5
-            var todosProdutos = products.Data.ToList();
+            var todosProdutos = products;
             var lotes = todosProdutos.Select((produto, index) => new { produto, index })
                                    .GroupBy(x => x.index / 5)
                                    .Select(g => g.Select(x => x.produto).ToList())
@@ -77,25 +108,28 @@ namespace WorkerService1.Discord.Modules
                 {
                     var productName = product.Name ?? "Sem nome";
                     
-                    // Usar preço já expandido (otimização)
+                    // Buscar o preço correspondente
+                    var productPrice = prices.FirstOrDefault(p => p.ProductId == product.Id);
                     string priceText = "Preço não definido";
+                    string planMappingKey = string.Empty;
                     
-                    if (product.DefaultPrice != null)
+                    if (productPrice != null)
                     {
-                        var defaultPrice = product.DefaultPrice;
-                        var unitAmount = defaultPrice.UnitAmount ?? 0;
-                        var currency = defaultPrice.Currency?.ToUpper() ?? "USD";
+                        var unitAmount = productPrice.UnitAmount ?? 0;
+                        var currency = productPrice.Currency?.ToUpper() ?? "USD";
                         var amountFormatted = unitAmount > 0 ? $"R$ {unitAmount / 100.0:F2}" : "Gratuito";
                         
-                        var interval = defaultPrice.Recurring?.Interval ?? "único";
-                        var intervalCount = defaultPrice.Recurring?.IntervalCount ?? 1;
+                        var interval = productPrice.Recurring?.Interval ?? "único";
+                        var intervalCount = productPrice.Recurring?.IntervalCount ?? 1;
                         var intervalText = intervalCount > 1 ? $"a cada {intervalCount} {interval}s" : $"por {interval}";
                         
                         priceText = $"{amountFormatted} {currency} / {intervalText}";
+                        
+                        // Buscar o mapping key
+                        var mapping = mappedProducts.FirstOrDefault(m => m.StripePriceId == productPrice.Id);
+                        planMappingKey = mapping?.Slug ?? string.Empty;
                     }
 
-                    // Verificar se existe no PlanMapping
-                    var planMappingKey = await GetPlanMappingKeyAsync(product.DefaultPriceId);
                     var comandoCompra = !string.IsNullOrEmpty(planMappingKey) 
                         ? $"`/comprar {planMappingKey}`" 
                         : "❌ Não disponível para compra";
@@ -132,7 +166,7 @@ namespace WorkerService1.Discord.Modules
                 }
 
                 embed.AddField("🛍️ Planos Disponíveis", conteudoFinal, false);
-                embed.WithFooter($"Total: {products.Data.Count} planos ativos");
+                embed.WithFooter($"Total: {products.Count} planos ativos");
 
                 // Enviar como follow-up
                 await FollowupAsync(embed: embed.Build(), ephemeral: true);
@@ -144,7 +178,7 @@ namespace WorkerService1.Discord.Modules
                 }
             }
 
-            _logger.LogInformation($"Comando /planos executado por {Context.User.Username} (ID: {Context.User.Id}) - {products.Data.Count} planos listados");
+            _logger.LogInformation($"Comando /planos executado por {Context.User.Username} (ID: {Context.User.Id}) - {products.Count} planos listados");
         }
         catch (Exception ex)
         {
@@ -153,17 +187,5 @@ namespace WorkerService1.Discord.Modules
         }
     }
 
-    private async Task<string> GetPlanMappingKeyAsync(string priceId)
-    {
-        if (string.IsNullOrEmpty(priceId))
-            return string.Empty;
-
-        // Busca na tabela PlanMappings do banco de dados
-        var mapping = await _dbContext.PlanMappings
-            .FirstOrDefaultAsync(m => m.StripePriceId == priceId);
-    
-        // Retorna o 'Slug' (o nome amigável para o comando /comprar) ou uma string vazia
-        return mapping?.Slug ?? string.Empty;
-    }
 }
 }

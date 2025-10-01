@@ -1,5 +1,7 @@
 using Stripe;
 using Stripe.Checkout;
+using WorkerService1.Data;
+using Microsoft.EntityFrameworkCore;
 
 namespace WorkerService1.Discord.Services
 {
@@ -7,23 +9,30 @@ namespace WorkerService1.Discord.Services
     {
         private readonly IConfiguration _config;
         private readonly ILogger<StripeService> _logger;
+        private readonly SubscriptionDbContext _dbContext;
 
-        public StripeService(IConfiguration config, ILogger<StripeService> logger)
+        public StripeService(IConfiguration config, ILogger<StripeService> logger, SubscriptionDbContext dbContext)
         {
             _config = config;
             _logger = logger;
+            _dbContext = dbContext;
             // A chave da API pode ser configurada aqui ou no Program.cs
             StripeConfiguration.ApiKey = _config["Stripe:SecretKey"];
         }
 
         public async Task<string> CreateCheckoutSessionUrlAsync(string planName, ulong discordUserId)
         {
-            var priceId = _config.GetValue<string>($"PlanMapping:{planName.ToLower()}");
-            if (string.IsNullOrEmpty(priceId))
+            // Buscar no banco de dados em vez do appsettings.json
+            var mapping = await _dbContext.PlanMappings
+                .FirstOrDefaultAsync(m => m.Slug == planName.ToLower());
+            
+            if (mapping == null)
             {
                 // Lança uma exceção que o módulo de comando pode capturar
                 throw new ArgumentException($"Plano '{planName}' não encontrado.");
             }
+            
+            var priceId = mapping.StripePriceId;
 
             try
             {

@@ -2,6 +2,7 @@ using Discord;
 using Discord.WebSocket;
 using WorkerService1.Data;
 using System.Text.RegularExpressions;
+using Stripe;
 
 namespace WorkerService1.Services
 {
@@ -104,14 +105,22 @@ namespace WorkerService1.Services
                 _logger.LogInformation("Canal '{MesaChannelName}' já existe na categoria correta.", mesaChannelName);
             }
             // 5. Mapeamento
-            //mapeamento price <-> cargo
-            var priceId = product.DefaultPriceId;
-            if (string.IsNullOrEmpty(priceId))
+            // Buscar preços do produto em vez de usar DefaultPriceId
+            var prices = await GetProductPricesAsync(product.Id);
+            if (!prices.Any())
             {
-                _logger.LogError("Produto {ProductName} não tem um Preço Padrão (Default Price) definido no Stripe. Mapeamento não será criado.", product.Name);
+                _logger.LogError("Produto {ProductName} não tem preços ativos definidos no Stripe. Mapeamento não será criado.", product.Name);
                 return;
             }
 
+            // Usar o primeiro preço ativo encontrado (ou você pode implementar lógica para escolher o preço padrão)
+            var price = prices.First();
+            var priceId = price.Id;
+
+            _logger.LogInformation("Usando preço {PriceId} (R$ {Amount:F2}) para o produto {ProductName}", 
+                priceId, (price.UnitAmount ?? 0) / 100.0, product.Name);
+
+            // Mapeamento price <-> cargo
             var existingMapping = await _dbContext.PlanRoleMappings.FindAsync(priceId);
             if (existingMapping == null)
             {
@@ -121,22 +130,14 @@ namespace WorkerService1.Services
                     DiscordRoleId = playerRole.Id // Usamos o ID do cargo dos jogadores
                 };
                 _dbContext.PlanRoleMappings.Add(newMapping);
-                await _dbContext.SaveChangesAsync();
-                _logger.LogInformation("Mapeamento automático salvo no DB: Price ID {PriceId} -> Role ID {RoleId}", priceId, playerRole.Id);
+                _logger.LogInformation("Mapeamento automático adicionado: Price ID {PriceId} -> Role ID {RoleId}", priceId, playerRole.Id);
             }
             else
             {
                 _logger.LogInformation("Mapeamento para o Price ID {PriceId} já existe no DB.", priceId);
             }
             
-            //mapeamento do nome <-> price
-            if (string.IsNullOrEmpty(priceId))
-            {
-                _logger.LogError("Produto {ProductName} não tem um Preço Padrão (Default Price). Mapeamento de Compra e Cargo não será criado.", product.Name);
-                return; // Para a execução se não houver preço
-            }
-
-            // 1. Automatiza o PlanMapping (para o comando /comprar)
+            // Mapeamento do nome <-> price
             var slug = CreateSlug(product.Name);
             var existingPlanMapping = await _dbContext.PlanMappings.FindAsync(slug);
             if (existingPlanMapping == null)
@@ -147,7 +148,36 @@ namespace WorkerService1.Services
                     StripePriceId = priceId,
                     ProductName = product.Name
                 });
-                _logger.LogInformation("Mapeamento de Plano salvo no DB: Slug '{Slug}' -> Price ID {PriceId}", slug, priceId);
+                _logger.LogInformation("Mapeamento de Plano adicionado: Slug '{Slug}' -> Price ID {PriceId}", slug, priceId);
+            }
+            else
+            {
+                _logger.LogInformation("Mapeamento de Plano para o Slug '{Slug}' já existe no DB.", slug);
+            }
+
+            // Salvar todas as mudanças de uma vez só
+            try
+            {
+                await _dbContext.SaveChangesAsync();
+                _logger.LogInformation("Todos os mapeamentos salvos com sucesso no banco de dados.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Erro ao salvar mapeamentos no banco de dados. Verificando se já existem...");
+                
+                // Verificar novamente se os mapeamentos já existem (pode ter sido criado por outro processo)
+                var finalMappingCheck = await _dbContext.PlanRoleMappings.FindAsync(priceId);
+                var finalPlanCheck = await _dbContext.PlanMappings.FindAsync(slug);
+                
+                if (finalMappingCheck != null && finalPlanCheck != null)
+                {
+                    _logger.LogInformation("Mapeamentos já existem no banco de dados. Continuando...");
+                }
+                else
+                {
+                    _logger.LogError("Falha ao salvar mapeamentos. Erro persistente.");
+                    throw; // Re-lança a exceção se não conseguir resolver
+                }
             }
         }
         
@@ -166,6 +196,33 @@ namespace WorkerService1.Services
             var nowhitespace = Regex.Replace(input.ToLower(), @"\s+", "-");
             var slug = Regex.Replace(nowhitespace, @"[^a-z0-9_-]", "");
             return slug;
+        }
+
+        // Método para buscar preços de um produto específico
+        private async Task<List<Price>> GetProductPricesAsync(string productId)
+        {
+            try
+            {
+                var options = new PriceListOptions
+                {
+                    Product = productId,
+                    Active = true,
+                    Limit = 100
+                };
+                
+                var priceService = new PriceService();
+                var prices = await priceService.ListAsync(options);
+                
+                _logger.LogInformation("Encontrados {Count} preços ativos para o produto {ProductId}", 
+                    prices.Data.Count, productId);
+                
+                return prices.Data.ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Erro ao buscar preços para o produto {ProductId}", productId);
+                return new List<Price>();
+            }
         }
     }
 }

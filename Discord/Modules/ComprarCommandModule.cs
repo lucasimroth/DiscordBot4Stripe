@@ -43,62 +43,35 @@ namespace WorkerService1.Discord.Modules
         try
         {
             // Verificar se é uma chave mapeada no PlanMapping
-            var mapping = await _dbContext.PlanMappings.FirstOrDefaultAsync(m => m.Slug == produto_id.ToLower());
+            var mapping = await _dbContext.PlanMappings
+                .FirstOrDefaultAsync(m => m.Slug == produto_id.ToLower());
                 
             if (mapping == null)
             {
                 await FollowupAsync("❌ Plano não encontrado! Use o comando `/planos listar` para ver os planos disponíveis.", ephemeral: true);
                 return;
             }
+            
             var priceId = mapping.StripePriceId;
+            _logger.LogInformation($"Usando mapeamento do banco: {produto_id} -> {priceId} (Produto: {mapping.ProductName})");
             
-            Stripe.Product product;
-            Stripe.Price price;
+            // Buscar o preço e produto usando o mapeamento do banco
             var priceService = new Stripe.PriceService();
+            var price = await priceService.GetAsync(priceId);
             
-            if (!string.IsNullOrEmpty(priceId))
+            if (price == null || !price.Active)
             {
-                // É uma chave mapeada, buscar o preço e depois o produto
-                _logger.LogInformation($"Usando mapeamento: {produto_id} -> {priceId}");
-                price = await priceService.GetAsync(priceId);
-                
-                if (price == null)
-                {
-                    await FollowupAsync("❌ Preço mapeado não encontrado.", ephemeral: true);
-                    return;
-                }
-                
-                // Buscar o produto a partir do preço
-                var productService = new Stripe.ProductService();
-                product = await productService.GetAsync(price.ProductId);
+                await FollowupAsync("❌ Preço não encontrado ou inativo no Stripe.", ephemeral: true);
+                return;
             }
-            else
-            {
-                // Tentar como ID direto do produto
-                var productService = new Stripe.ProductService();
-                try
-                {
-                    product = await productService.GetAsync(produto_id);
-                    
-                    // Buscar preço padrão
-                    if (string.IsNullOrEmpty(product.DefaultPriceId))
-                    {
-                        await FollowupAsync("❌ Este produto não possui preço configurado.", ephemeral: true);
-                        return;
-                    }
-                    
-                    price = await priceService.GetAsync(product.DefaultPriceId);
-                }
-                catch (StripeException)
-                {
-                    await FollowupAsync("❌ Produto não encontrado. Use uma chave válida do PlanMapping ou ID do produto.", ephemeral: true);
-                    return;
-                }
-            }
-
+            
+            // Buscar o produto a partir do preço
+            var productService = new Stripe.ProductService();
+            var product = await productService.GetAsync(price.ProductId);
+            
             if (product == null || !product.Active)
             {
-                await FollowupAsync("❌ Produto não encontrado ou indisponível.", ephemeral: true);
+                await FollowupAsync("❌ Produto não encontrado ou inativo no Stripe.", ephemeral: true);
                 return;
             }
 

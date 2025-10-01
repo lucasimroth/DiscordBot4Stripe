@@ -11,15 +11,14 @@ namespace Workerservice1.Controller
         private readonly ILogger<StripeWebhookController> _logger;
         private readonly StripeWebhookService _webhookService;
         private readonly string? _webhookSecret;
-        // Injete os outros serviços se precisar manter os endpoints de teste
-        private readonly ProductNotificationService _productNotificationService; 
+        
     
-        public StripeWebhookController(ILogger<StripeWebhookController> logger, IConfiguration config, StripeWebhookService webhookService, ProductNotificationService productNotificationService)
+        public StripeWebhookController(ILogger<StripeWebhookController> logger, IConfiguration config, StripeWebhookService webhookService)
         {
             _logger = logger;
             _webhookService = webhookService;
             _webhookSecret = config["Stripe:WebhookSecret"];
-            _productNotificationService = productNotificationService; // Para os testes
+            
         }
     
         [HttpPost]
@@ -45,18 +44,6 @@ namespace Workerservice1.Controller
                 return BadRequest();
             }
         }
-        
-        // --- SEUS ENDPOINTS DE TESTE CONTINUAM AQUI ---
-        // Eles apenas foram adaptados para chamar os serviços
-        [HttpGet("test-product-created")]
-        public async Task<IActionResult> TestProductCreated()
-        {
-            var testProduct = new Product { Id = "test_prod_1", Name = "Produto Teste Criado" };
-            await _productNotificationService.HandleProductCreated(testProduct);
-            return Ok("Teste de criação de produto executado.");
-        }
-    
-        // ... (adapte os outros endpoints de teste da mesma forma) ...
     }
 }
 

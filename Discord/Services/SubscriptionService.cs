@@ -61,8 +61,19 @@ namespace WorkerService1.Discord.Services
             var user = guild.GetUser(discordUserId);
             if (user == null)
             {
-                _logger.LogError($"Usuário Discord ID {discordUserId} não foi encontrado no servidor {guild.Name}.");
-                return;
+                _logger.LogWarning($"⚠️ Usuário ainda não encontrado. Tentando buscar todos os membros...");
+            
+                // Buscar todos os membros do servidor
+                try
+                {
+                    await guild.DownloadUsersAsync();
+                    user = guild.GetUser(discordUserId);
+                    _logger.LogInformation($"✅ Usuário encontrado após DownloadUsersAsync: {user?.Username}");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning($"Erro ao fazer DownloadUsersAsync: {ex.Message}");
+                }
             }
 
             var role = guild.GetRole(roleId);
@@ -71,19 +82,27 @@ namespace WorkerService1.Discord.Services
                 _logger.LogError($"Cargo não encontrado no servidor com ID: {roleId}");
                 return;
             }
+            _logger.LogInformation($"Tentando adicionar cargo '{role.Name}' ao usuário '{user.Username}'");
+
 
             await user.AddRoleAsync(role);
             _logger.LogInformation($"Cargo '{role.Name}' adicionado com sucesso ao usuário '{user.Username}'");
-            
-            var newSubscription = new UserSubscription
+            try
             {
-                StripeSubscriptionId = session.SubscriptionId,
-                DiscordUserId = discordUserId,
-                StripeCustomerId = session.CustomerId
-            };
-            _dbContext.UserSubscriptions.Add(newSubscription);
-            await _dbContext.SaveChangesAsync();
-            _logger.LogInformation($"Assinatura {session.SubscriptionId} salva no banco de dados.");
+                var newSubscription = new UserSubscription
+                {
+                    StripeSubscriptionId = session.SubscriptionId,
+                    DiscordUserId = discordUserId,
+                    StripeCustomerId = session.CustomerId
+                };
+                _dbContext.UserSubscriptions.Add(newSubscription);
+                await _dbContext.SaveChangesAsync();
+                _logger.LogInformation($"Assinatura {session.SubscriptionId} salva no banco de dados.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Erro ao salvar assinatura {session.SubscriptionId} no banco de dados.");
+            }
         }
 
         public async Task HandleSubscriptionDeleted(Subscription subscription)
@@ -101,19 +120,41 @@ namespace WorkerService1.Discord.Services
             // ... (resto da sua lógica para remover o cargo e a entrada no DB) ...
             var priceId = subscription.Items.Data[0].Price.Id;
             var roleIdStr = _configuration.GetValue<string>($"RoleMapping:{priceId}");
-            if (!ulong.TryParse(roleIdStr, out var roleId)) return;
+            if (string.IsNullOrEmpty(roleIdStr) || !ulong.TryParse(roleIdStr, out var roleId)) { 
+                _logger.LogWarning($"Role ID não encontrado para o price {priceId}");
+                return; 
+            }
             var guildIdStr = _configuration["DiscordGuildId"];
-            if (!ulong.TryParse(guildIdStr, out var guildId)) return;
+            if (string.IsNullOrEmpty(guildIdStr) || !ulong.TryParse(guildIdStr, out var guildId)) 
+            {
+                _logger.LogError("DiscordGuildId não configurado ou inválido");
+                return;
+            }
 
             var guild = _client.GetGuild(guildId);
             var user = guild?.GetUser(userSubscription.DiscordUserId);
             var role = guild?.GetRole(roleId);
 
-            if(user != null && role != null)
+            if (user != null && role != null)
             {
                 await user.RemoveRoleAsync(role);
+                _logger.LogInformation($"Cargo '{role.Name}' removido do usuário '{user.Username}' devido ao fim da assinatura.");
             }
-
+            else
+            {
+                _logger.LogWarning($"Não foi possível remover o cargo do usuário {userSubscription.DiscordUserId} (cargo ou usuário não encontrado).");
+            }
+        
+            try
+            {
+                _dbContext.UserSubscriptions.Remove(userSubscription);
+                await _dbContext.SaveChangesAsync();
+                _logger.LogInformation($"Assinatura {subscription.Id} removida do banco de dados.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Erro ao remover assinatura {subscription.Id} do banco de dados.");
+            }
             _dbContext.UserSubscriptions.Remove(userSubscription);
             await _dbContext.SaveChangesAsync();
             _logger.LogInformation($"Assinatura {subscription.Id} removida do banco de dados.");

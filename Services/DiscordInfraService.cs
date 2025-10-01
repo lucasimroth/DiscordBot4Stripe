@@ -1,9 +1,6 @@
 using Discord;
 using Discord.WebSocket;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
-using System.Linq;
-using System.Threading.Tasks;
+
 
 namespace WorkerService1.Services
 {
@@ -37,16 +34,17 @@ namespace WorkerService1.Services
             if (guild == null) return;
             
             // 2. Lógica do CARGO (Mestre)
-            var mestreRole = guild.Roles.FirstOrDefault(r => r.Name.Equals(mestreName, System.StringComparison.OrdinalIgnoreCase));
+            
+            var restGuild = await _client.Rest.GetGuildAsync(guild.Id);
+            var allRoles = restGuild.Roles;
+            var mestreRole = allRoles.FirstOrDefault(r => r.Name.Equals(mestreName, System.StringComparison.OrdinalIgnoreCase));
             if (mestreRole == null)
             {
                 _logger.LogInformation("Cargo '{MestreName}' não encontrado. Criando...", mestreName);
     
                 // 1. Criamos o cargo e guardamos a resposta da API (um RestRole) em uma variável temporária.
-                var newRestRole = await guild.CreateRoleAsync(mestreName, isMentionable: true);
     
-                // 2. Agora, usamos o ID do novo cargo para pegar o objeto SocketRole completo do cache do servidor.
-                mestreRole = guild.GetRole(newRestRole.Id);
+                mestreRole = await guild.CreateRoleAsync(mestreName, isMentionable: true);
 
                 _logger.LogInformation("Cargo '{MestreName}' criado com sucesso.", mestreName);
             }
@@ -74,12 +72,17 @@ namespace WorkerService1.Services
             }
 
             // 4. Lógica do CANAL (Mesa)
-            var mesaChannel = guild.TextChannels.FirstOrDefault(c => c.Name.Equals(mesaChannelName, System.StringComparison.OrdinalIgnoreCase));
+            var mesaChannel = guild.TextChannels.FirstOrDefault(c => 
+                c.Name.Equals(mesaChannelName, System.StringComparison.OrdinalIgnoreCase) &&
+                c.CategoryId == aventuraCategory.Id);
             if (mesaChannel == null)
             {
                 _logger.LogInformation("Canal '{MesaChannelName}' não encontrado. Criando dentro da categoria '{AventuraName}'...", mesaChannelName, aventuraCategory.Name);
                 await guild.CreateTextChannelAsync(mesaChannelName, props => props.CategoryId = aventuraCategory.Id);
                 await guild.CreateVoiceChannelAsync(mesaChannelName, props => props.CategoryId = aventuraCategory.Id);
+            }else
+            {
+                _logger.LogInformation("Canal '{MesaChannelName}' já existe na categoria correta.", mesaChannelName);
             }
         }
         

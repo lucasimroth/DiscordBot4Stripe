@@ -1,5 +1,6 @@
 using Discord;
 using Discord.Interactions;
+using WorkerService1.Data;
 using Discord.WebSocket;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -9,6 +10,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
 
 namespace WorkerService1.Discord.Modules
 {
@@ -16,11 +18,14 @@ namespace WorkerService1.Discord.Modules
 {
     private readonly IConfiguration _configuration;
     private readonly ILogger<ComprarCommandModule> _logger;
+    private readonly SubscriptionDbContext _dbContext;
 
-    public ComprarCommandModule(IConfiguration configuration, ILogger<ComprarCommandModule> logger)
+    public ComprarCommandModule(IConfiguration configuration, ILogger<ComprarCommandModule> logger, SubscriptionDbContext dbContext)
     {
         _configuration = configuration;
         _logger = logger;
+        _dbContext = dbContext;
+
     }
 
     [SlashCommand("comprar", "Comprar um plano específico")]
@@ -38,7 +43,14 @@ namespace WorkerService1.Discord.Modules
         try
         {
             // Verificar se é uma chave mapeada no PlanMapping
-            var priceId = _configuration.GetSection("PlanMapping")[produto_id];
+            var mapping = await _dbContext.PlanMappings.FirstOrDefaultAsync(m => m.Slug == produto_id.ToLower());
+                
+            if (mapping == null)
+            {
+                await FollowupAsync("❌ Plano não encontrado! Use o comando `/planos listar` para ver os planos disponíveis.", ephemeral: true);
+                return;
+            }
+            var priceId = mapping.StripePriceId;
             
             Stripe.Product product;
             Stripe.Price price;

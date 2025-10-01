@@ -1,10 +1,12 @@
 using Discord;
 using Discord.Interactions;
+using WorkerService1.Data;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Stripe;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
 
 namespace WorkerService1.Discord.Modules
 {
@@ -13,11 +15,13 @@ namespace WorkerService1.Discord.Modules
 {
     private readonly IConfiguration _configuration;
     private readonly ILogger<PlanosCommandModule> _logger;
+    private readonly SubscriptionDbContext _dbContext;
 
-    public PlanosCommandModule(IConfiguration configuration, ILogger<PlanosCommandModule> logger)
+    public PlanosCommandModule(IConfiguration configuration, ILogger<PlanosCommandModule> logger, SubscriptionDbContext dbContext)
     {
         _configuration = configuration;
         _logger = logger;
+        _dbContext = dbContext;
     }
 
     [SlashCommand("listar", "Lista todos os planos disponíveis com informações detalhadas")]
@@ -91,7 +95,7 @@ namespace WorkerService1.Discord.Modules
                     }
 
                     // Verificar se existe no PlanMapping
-                    var planMappingKey = GetPlanMappingKey(product.DefaultPriceId);
+                    var planMappingKey = await GetPlanMappingKeyAsync(product.DefaultPriceId);
                     var comandoCompra = !string.IsNullOrEmpty(planMappingKey) 
                         ? $"`/comprar {planMappingKey}`" 
                         : "❌ Não disponível para compra";
@@ -149,14 +153,17 @@ namespace WorkerService1.Discord.Modules
         }
     }
 
-    private string GetPlanMappingKey(string priceId)
+    private async Task<string> GetPlanMappingKeyAsync(string priceId)
     {
         if (string.IsNullOrEmpty(priceId))
             return string.Empty;
 
-        var planMappingSection = _configuration.GetSection("PlanMapping");
-        return planMappingSection.GetChildren()
-            .FirstOrDefault(x => x.Value == priceId)?.Key ?? string.Empty;
+        // Busca na tabela PlanMappings do banco de dados
+        var mapping = await _dbContext.PlanMappings
+            .FirstOrDefaultAsync(m => m.StripePriceId == priceId);
+    
+        // Retorna o 'Slug' (o nome amigável para o comando /comprar) ou uma string vazia
+        return mapping?.Slug ?? string.Empty;
     }
 }
 }

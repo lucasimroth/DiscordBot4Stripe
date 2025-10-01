@@ -35,14 +35,14 @@ namespace WorkerService1.Discord.Services
             var lineItemService = new Stripe.Checkout.SessionLineItemService();
             var lineItems = await lineItemService.ListAsync(session.Id);
             var priceId = lineItems.Data[0].Price.Id;
-            var roleIdStr = _configuration.GetValue<string>($"RoleMapping:{priceId}");
-
-            if (string.IsNullOrEmpty(roleIdStr) || !ulong.TryParse(roleIdStr, out var roleId))
+            var mapping = await _dbContext.PlanRoleMappings.FindAsync(priceId);
+            if (mapping == null)
             {
-                _logger.LogWarning($"Role ID não encontrado ou inválido para price: {priceId}");
+                _logger.LogWarning($"Mapeamento de cargo não encontrado no banco de dados para o Price ID: {priceId}");
                 return;
             }
-
+            var roleId = mapping.DiscordRoleId;
+            
             var guildIdStr = _configuration["Discord:GuildId"];
             if (!ulong.TryParse(guildIdStr, out var guildId))
             {
@@ -61,19 +61,8 @@ namespace WorkerService1.Discord.Services
             var user = guild.GetUser(discordUserId);
             if (user == null)
             {
-                _logger.LogWarning($"⚠️ Usuário ainda não encontrado. Tentando buscar todos os membros...");
-            
-                // Buscar todos os membros do servidor
-                try
-                {
-                    await guild.DownloadUsersAsync();
-                    user = guild.GetUser(discordUserId);
-                    _logger.LogInformation($"✅ Usuário encontrado após DownloadUsersAsync: {user?.Username}");
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning($"Erro ao fazer DownloadUsersAsync: {ex.Message}");
-                }
+                _logger.LogWarning($"⚠️ Usuário ainda encontrado. ");
+                return;
             }
 
             var role = guild.GetRole(roleId);
@@ -119,9 +108,14 @@ namespace WorkerService1.Discord.Services
             
             // ... (resto da sua lógica para remover o cargo e a entrada no DB) ...
             var priceId = subscription.Items.Data[0].Price.Id;
-            var roleIdStr = _configuration.GetValue<string>($"RoleMapping:{priceId}");
+            var mapping = await _dbContext.PlanRoleMappings.FindAsync(priceId);
+            if (mapping == null)
+            {
+                _logger.LogWarning($"Mapeamento de cargo não encontrado no DB para o Price ID: {priceId} da assinatura cancelada.");
+                // Mesmo sem o mapeamento, ainda removemos a entrada do userSubscription
+            }
+            var roleId = mapping?.DiscordRoleId ?? 0; // Pega o ID ou 0 se o mapping for nulo
 
-            if (!ulong.TryParse(roleIdStr, out var roleId)) return;
             var guildIdStr = _configuration["Discord:GuildId"];
             if (!ulong.TryParse(guildIdStr, out var guildId)) return;
 
@@ -149,9 +143,6 @@ namespace WorkerService1.Discord.Services
             {
                 _logger.LogError(ex, $"Erro ao remover assinatura {subscription.Id} do banco de dados.");
             }
-            _dbContext.UserSubscriptions.Remove(userSubscription);
-            await _dbContext.SaveChangesAsync();
-            _logger.LogInformation($"Assinatura {subscription.Id} removida do banco de dados.");
         }
     }
 }

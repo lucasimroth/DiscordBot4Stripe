@@ -142,7 +142,7 @@ namespace WorkerService1.Discord.Services
             var guildIdStr = _configuration["Discord:GuildId"];
             if (!ulong.TryParse(guildIdStr, out var guildId))
             {
-                _logger.LogError("DiscordGuildId não configurado ou é inválido.");
+                _logger.LogError("Discord:GuildId não configurado ou é inválido.");
                 return;
             }
 

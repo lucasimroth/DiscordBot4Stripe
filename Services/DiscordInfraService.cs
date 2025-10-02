@@ -11,7 +11,7 @@ namespace WorkerService1.Services
         private readonly ILogger<DiscordInfraService> _logger;
         private readonly IConfiguration _config;
         private readonly DiscordSocketClient _client;
-        private readonly SubscriptionDbContext _dbContext;
+        private readonly SubscriptionDbContext _dbContext; 
 
 
         public DiscordInfraService(ILogger<DiscordInfraService> logger,
@@ -43,11 +43,17 @@ namespace WorkerService1.Services
                 return;
             }
 
-            var guild = _client.GetGuild(ulong.Parse(_config["Discord:GuildId"]));
+            var guildId = _config["Discord:GuildId"];
+            if (string.IsNullOrEmpty(guildId))
+            {
+                _logger.LogError("GuildId não configurado no appsettings.json");
+                return;
+            }
+            var guild = _client.GetGuild(ulong.Parse(guildId));
             if (guild == null) return;
-
+            
             // 2. Lógica do CARGO (Mestre)
-
+            
             var restGuild = await _client.Rest.GetGuildAsync(guild.Id);
             var allRoles = restGuild.Roles;
             var mestreRole =
@@ -55,14 +61,14 @@ namespace WorkerService1.Services
             if (mestreRole == null)
             {
                 _logger.LogInformation("Cargo '{MestreName}' não encontrado. Criando...", mestreName);
-
+    
                 // 1. Criamos o cargo e guardamos a resposta da API (um RestRole) em uma variável temporária.
-
+    
                 mestreRole = await guild.CreateRoleAsync(mestreName, isMentionable: true);
 
                 _logger.LogInformation("Cargo '{MestreName}' criado com sucesso.", mestreName);
             }
-
+            
             //2.1 Logica do CARGO(player)
             var playerRole = allRoles.FirstOrDefault(r =>
                 r.Name.Equals(playerRoleName, System.StringComparison.OrdinalIgnoreCase));
@@ -80,7 +86,7 @@ namespace WorkerService1.Services
             if (aventuraCategory == null)
             {
                 _logger.LogInformation("Categoria '{AventuraName}' não encontrada. Criando...", aventuraName);
-
+    
                 // 1. Cria a categoria e guarda a resposta da API (um RestCategoryChannel)
                 var newRestCategory = await guild.CreateCategoryChannelAsync(aventuraName);
 
@@ -166,7 +172,7 @@ namespace WorkerService1.Services
             {
                 _logger.LogInformation("Mapeamento para o Price ID {PriceId} já existe no DB.", priceId);
             }
-
+            
             // Mapeamento do nome <-> price
             var slug = CreateSlug(product.Name);
             var existingPlanMapping = await _dbContext.PlanMappings.FindAsync(slug);
@@ -212,7 +218,7 @@ namespace WorkerService1.Services
             }
         }
 
-        public async Task DeprovisionProductInfrastructureAsync(Stripe.Product product)
+        public async Task DeprovisionProductInfrastructureAsync(Stripe.Product product, bool forceDeleteCategory = false)
         {
             _logger.LogWarning("INICIANDO PROCESSO DE DEPROVISIONAMENTO para o produto: {ProductName}", product.Name);
             _logger.LogWarning("AVISO: Esta é uma ação destrutiva e irreversível.");
@@ -234,7 +240,13 @@ namespace WorkerService1.Services
                     return;
                 }
 
-                var guild = _client.GetGuild(ulong.Parse(_config["Discord:GuildId"]));
+                var guildId = _config["Discord:GuildId"];
+                if (string.IsNullOrEmpty(guildId))
+                {
+                    _logger.LogError("GuildId não configurado no appsettings.json");
+                    return;
+                }
+                var guild = _client.GetGuild(ulong.Parse(guildId));
                 if (guild == null)
                 {
                     _logger.LogError("Servidor não encontrado, deprovisionamento cancelado.");
@@ -258,21 +270,42 @@ namespace WorkerService1.Services
                 // 3. Deletar os canais da mesa (se existirem)
                 if (mesaChannelTexto != null)
                 {
-                    _logger.LogInformation("Deletando canal de texto: #{MesaChannelName}", mesaChannelTexto.Name);
-                    await mesaChannelTexto.DeleteAsync();
+                    try
+                    {
+                        _logger.LogInformation("Deletando canal de texto: #{MesaChannelName}", mesaChannelTexto.Name);
+                        await mesaChannelTexto.DeleteAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Erro ao deletar canal de texto #{MesaChannelName}. Canal pode já ter sido deletado.", mesaChannelTexto.Name);
+                    }
                 }
 
                 if (mesaChannelVoz != null)
                 {
-                    _logger.LogInformation("Deletando canal de voz: {MesaChannelName}", mesaChannelVoz.Name);
-                    await mesaChannelVoz.DeleteAsync();
+                    try
+                    {
+                        _logger.LogInformation("Deletando canal de voz: {MesaChannelName}", mesaChannelVoz.Name);
+                        await mesaChannelVoz.DeleteAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Erro ao deletar canal de voz {MesaChannelName}. Canal pode já ter sido deletado.", mesaChannelVoz.Name);
+                    }
                 }
 
                 // 4. Deletar o cargo do assinante (se existir)
                 if (playerRole != null)
                 {
-                    _logger.LogInformation("Deletando cargo de jogador: {PlayerRoleName}", playerRole.Name);
-                    await playerRole.DeleteAsync();
+                    try
+                    {
+                        _logger.LogInformation("Deletando cargo de jogador: {PlayerRoleName}", playerRole.Name);
+                        await playerRole.DeleteAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Erro ao deletar cargo {PlayerRoleName}. Cargo pode já ter sido deletado.", playerRole.Name);
+                    }
                 }
 
                 // 5. Verificar se a categoria ficou vazia e, se sim, deletá-la
@@ -287,40 +320,65 @@ namespace WorkerService1.Services
                     // Buscamos a versão mais atualizada da categoria a partir do cache do servidor.
                     var updatedCategory = guild.GetCategoryChannel(aventuraCategory.Id);
 
-                    // Verificamos a propriedade 'Channels' da própria categoria.
-                    // O '.Any()' checa se a lista de canais dentro dela tem algum item.
-                    if (updatedCategory != null && !updatedCategory.Channels.Any())
+                    // Verificamos se a categoria ficou vazia ou se só tem canais que foram criados pelo sistema
+                    if (updatedCategory != null)
                     {
-                        _logger.LogInformation("A categoria '{AventuraName}' está vazia. Deletando...", updatedCategory.Name);
-                        await updatedCategory.DeleteAsync();
-                    }
-                    else
-                    {
-                        _logger.LogInformation("A categoria '{AventuraName}' ainda contém outros canais e não será deletada.", aventuraCategory.Name);
+                        var remainingChannels = updatedCategory.Channels.ToList();
+                        var channelsCreatedBySystem = remainingChannels.Where(c => 
+                            c.Name.Equals(mesaChannelName, StringComparison.OrdinalIgnoreCase)).ToList();
+
+                        // Se não há canais restantes OU se todos os canais restantes foram criados pelo sistema OU se forçar deleção
+                        if (!remainingChannels.Any() || remainingChannels.Count == channelsCreatedBySystem.Count || forceDeleteCategory)
+                        {
+                            try
+                            {
+                                if (forceDeleteCategory && remainingChannels.Any() && remainingChannels.Count != channelsCreatedBySystem.Count)
+                                {
+                                    _logger.LogWarning("FORÇANDO deleção da categoria '{AventuraName}' mesmo com {Count} canais não criados pelo sistema.", 
+                                        updatedCategory.Name, remainingChannels.Count - channelsCreatedBySystem.Count);
+                                }
+                                else
+                                {
+                                    _logger.LogInformation("A categoria '{AventuraName}' está vazia ou só contém canais do sistema. Deletando...", updatedCategory.Name);
+                                }
+                                await updatedCategory.DeleteAsync();
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Erro ao deletar categoria '{AventuraName}'. Categoria pode já ter sido deletada.", updatedCategory.Name);
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogInformation("A categoria '{AventuraName}' contém {Count} canais que não foram criados pelo sistema e não será deletada.", 
+                                updatedCategory.Name, remainingChannels.Count - channelsCreatedBySystem.Count);
+                        }
                     }
                 }
 
                 // 6. Remover os mapeamentos do banco de dados
-                var priceId = product.DefaultPriceId; // Ou buscar todos os preços associados, se houver mais de um
-                if (!string.IsNullOrEmpty(priceId))
+                // Buscar todos os preços associados ao produto
+                var prices = await GetProductPricesAsync(product.Id);
+                foreach (var price in prices)
                 {
-                    var roleMapping = await _dbContext.PlanRoleMappings.FindAsync(priceId);
+                    var roleMapping = await _dbContext.PlanRoleMappings.FindAsync(price.Id);
                     if (roleMapping != null)
                     {
                         _dbContext.PlanRoleMappings.Remove(roleMapping);
-                        _logger.LogInformation("Mapeamento de Cargo (Price ID {PriceId}) removido do DB.", priceId);
+                        _logger.LogInformation("Mapeamento de Cargo (Price ID {PriceId}) removido do DB.", price.Id);
                     }
-
-                    var slug = CreateSlug(product.Name);
-                    var planMapping = await _dbContext.PlanMappings.FindAsync(slug);
-                    if (planMapping != null)
-                    {
-                        _dbContext.PlanMappings.Remove(planMapping);
-                        _logger.LogInformation("Mapeamento de Plano (Slug '{Slug}') removido do DB.", slug);
-                    }
-
-                    await _dbContext.SaveChangesAsync();
                 }
+
+                // Remover mapeamento de plano pelo slug
+                var slug = CreateSlug(product.Name);
+                var planMapping = await _dbContext.PlanMappings.FindAsync(slug);
+                if (planMapping != null)
+                {
+                    _dbContext.PlanMappings.Remove(planMapping);
+                    _logger.LogInformation("Mapeamento de Plano (Slug '{Slug}') removido do DB.", slug);
+                }
+
+                await _dbContext.SaveChangesAsync();
 
                 _logger.LogWarning("PROCESSO DE DEPROVISIONAMENTO CONCLUÍDO para o produto: {ProductName}",
                     product.Name);
@@ -331,8 +389,8 @@ namespace WorkerService1.Services
                     "Ocorreu um erro durante o deprovisionamento da infraestrutura do produto {ProductId}", product.Id);
             }
         }
-
-
+        
+        
         // Método auxiliar para criar um nome amigável (slug)
         private string CreateSlug(string input)
         {

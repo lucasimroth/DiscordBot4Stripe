@@ -53,7 +53,6 @@ namespace WorkerService1.Discord.Services
                 case "product.updated":
                     if (stripeEvent.Data.Object is Stripe.Product p3)
                     {
-                        await _discordInfraService.ProvisionProductInfrastructureAsync(p3); // Roda a mesma lógica para garantir que tudo está no lugar
                         await _productNotificationService.HandleProductUpdated(p3);
                     }
                     break;

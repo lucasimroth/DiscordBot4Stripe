@@ -2,6 +2,7 @@ using Discord;
 using Discord.WebSocket;
 using System.Text;
 using System.Collections.Concurrent;
+using WorkerService1.Services;
 
 namespace WorkerService1.Discord.Services
 {
@@ -10,17 +11,19 @@ namespace WorkerService1.Discord.Services
         private static readonly ConcurrentDictionary<string, CancellationTokenSource> _pendingCreations = new();
         private static readonly ConcurrentDictionary<string, CancellationTokenSource> _pendingUpdates = new();
         private static readonly ConcurrentDictionary<string, CancellationTokenSource> _pendingDeletions = new();
+        private readonly DiscordInfraService _discordInfraService;
 
         private readonly ILogger<ProductNotificationService> _logger;
         private readonly IConfiguration _configuration;
         private readonly DiscordSocketClient _client;
 
         public ProductNotificationService(ILogger<ProductNotificationService> logger, IConfiguration configuration,
-            DiscordSocketClient client)
+            DiscordSocketClient client, DiscordInfraService discordInfraService)
         {
             _logger = logger;
             _configuration = configuration;
             _client = client;
+            _discordInfraService = discordInfraService;
         }
 
         public Task HandleProductCreated(Stripe.Product product)
@@ -49,20 +52,34 @@ namespace WorkerService1.Discord.Services
             return StartDelayedNotification(product, "deleted", TimeSpan.FromSeconds(5), _pendingDeletions);
         }
 
-        public Task HandleProductUpdated(Stripe.Product product)
+        public async Task HandleProductUpdated(Stripe.Product product)
         {
-            // --- LÓGICA DE PRIORIDADE ---
-            // Se uma notificação de 'created' já está na fila, este 'updated' é provavelmente
-            // uma edição rápida e deve ser IGNORADO para não cancelar a mensagem de criação.
+            // A lógica de prioridade para ignorar o 'updated' se 'created' estiver pendente continua a mesma.
             if (_pendingCreations.ContainsKey(product.Id))
             {
                 _logger.LogInformation(
                     $"Ignorando evento 'updated' para {product.Id} porque uma notificação de 'created' já está pendente.");
-                return Task.CompletedTask;
+                return;
             }
 
-            var eventType = !product.Active ? "archived" : "updated";
-            return StartDelayedNotification(product, eventType, TimeSpan.FromSeconds(5), _pendingUpdates);
+            // --- LÓGICA DE LIMPEZA ADICIONADA AQUI ---
+            // Se o produto não está mais ativo, ele foi ARQUIVADO.
+            if (!product.Active)
+            {
+                _logger.LogInformation("Produto foi arquivado. Iniciando deprovisionamento da infraestrutura do Discord...");
+
+                // 1. PRIMEIRO, executa a lógica de limpeza (deletar canais, cargos, etc.)
+                await _discordInfraService.DeprovisionProductInfrastructureAsync(product);
+        
+                // 2. DEPOIS, inicia a espera para a notificação de "arquivado".
+                await StartDelayedNotification(product, "archived", TimeSpan.FromSeconds(5), _pendingUpdates);
+            }
+            else
+            {
+                // Se ele continua ativo, foi uma atualização genérica (nome, etc.).
+                // Apenas inicia a espera para a notificação de "atualizado".
+                await StartDelayedNotification(product, "updated", TimeSpan.FromSeconds(5), _pendingUpdates);
+            }
         }
 
         private Task StartDelayedNotification(Stripe.Product product, string eventType, TimeSpan delay,

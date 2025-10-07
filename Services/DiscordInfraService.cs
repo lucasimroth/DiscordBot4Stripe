@@ -30,7 +30,7 @@ namespace WorkerService1.Services
             // 1. Extrair os metadados
             product.Metadata.TryGetValue("mestre", out var mestreName);
             product.Metadata.TryGetValue("aventura", out var aventuraName);
-            product.Metadata.TryGetValue("mesa", out var mesaChannelName);
+            product.Metadata.TryGetValue("mestre-mesa-n-dia-periodo", out var mesaChannelName);
             product.Metadata.TryGetValue("cargo", out var playerRoleName);
 
 

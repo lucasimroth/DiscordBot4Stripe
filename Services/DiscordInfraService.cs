@@ -11,7 +11,7 @@ namespace WorkerService1.Services
         private readonly ILogger<DiscordInfraService> _logger;
         private readonly IConfiguration _config;
         private readonly DiscordSocketClient _client;
-        private readonly SubscriptionDbContext _dbContext; 
+        private readonly SubscriptionDbContext _dbContext;
 
 
         public DiscordInfraService(ILogger<DiscordInfraService> logger,
@@ -25,7 +25,7 @@ namespace WorkerService1.Services
             _dbContext = dbContext;
         }
 
-        public async Task ProvisionProductInfrastructureAsync(Stripe.Product product)
+        public async Task ProvisionProductInfrastructureAsync(Product product)
         {
             // 1. Extrair os metadados
             product.Metadata.TryGetValue("mestre", out var mestreName);
@@ -49,29 +49,30 @@ namespace WorkerService1.Services
                 _logger.LogError("GuildId não configurado no appsettings.json");
                 return;
             }
+
             var guild = _client.GetGuild(ulong.Parse(guildId));
             if (guild == null) return;
-            
+
             // 2. Lógica do CARGO (Mestre)
-            
+
             var restGuild = await _client.Rest.GetGuildAsync(guild.Id);
             var allRoles = restGuild.Roles;
             var mestreRole =
-                allRoles.FirstOrDefault(r => r.Name.Equals(mestreName, System.StringComparison.OrdinalIgnoreCase));
+                allRoles.FirstOrDefault(r => r.Name.Equals(mestreName, StringComparison.OrdinalIgnoreCase));
             if (mestreRole == null)
             {
                 _logger.LogInformation("Cargo '{MestreName}' não encontrado. Criando...", mestreName);
-    
+
                 // 1. Criamos o cargo e guardamos a resposta da API (um RestRole) em uma variável temporária.
-    
+
                 mestreRole = await guild.CreateRoleAsync(mestreName, isMentionable: true);
 
                 _logger.LogInformation("Cargo '{MestreName}' criado com sucesso.", mestreName);
             }
-            
+
             //2.1 Logica do CARGO(player)
             var playerRole = allRoles.FirstOrDefault(r =>
-                r.Name.Equals(playerRoleName, System.StringComparison.OrdinalIgnoreCase));
+                r.Name.Equals(playerRoleName, StringComparison.OrdinalIgnoreCase));
             if (playerRole == null)
             {
                 playerRole = await guild.CreateRoleAsync(playerRoleName, isMentionable: true);
@@ -79,14 +80,14 @@ namespace WorkerService1.Services
 
             // 3. Lógica da CATEGORIA (Aventura)
             var allChannels = await restGuild.GetChannelsAsync();
-            
+
             var aventuraCategory = allChannels.OfType<ICategoryChannel>().FirstOrDefault(c =>
                 c.Name.Equals(aventuraName, StringComparison.OrdinalIgnoreCase));
 
             if (aventuraCategory == null)
             {
                 _logger.LogInformation("Categoria '{AventuraName}' não encontrada. Criando...", aventuraName);
-    
+
                 // 1. Cria a categoria e guarda a resposta da API (um RestCategoryChannel)
                 var newRestCategory = await guild.CreateCategoryChannelAsync(aventuraName);
 
@@ -97,20 +98,38 @@ namespace WorkerService1.Services
                 _logger.LogInformation("Configurando permissões da categoria '{AventuraName}'...", aventuraName);
 
                 await aventuraCategory.AddPermissionOverwriteAsync(guild.EveryoneRole,
-                    new OverwritePermissions(viewChannel: PermValue.Deny));
+                    new OverwritePermissions(viewChannel: PermValue.Allow));
+
                 await aventuraCategory.AddPermissionOverwriteAsync(mestreRole,
                     new OverwritePermissions(viewChannel: PermValue.Allow));
                 await aventuraCategory.AddPermissionOverwriteAsync(_client.CurrentUser,
                     new OverwritePermissions(viewChannel: PermValue.Allow));
 
-                _logger.LogInformation("Permissões da categoria '{AventuraName}' configuradas para privada.",
+                _logger.LogInformation("Permissões da categoria '{AventuraName}' configuradas.",
                     aventuraName);
             }
 
+            // 3.5. Canal de assinatura
+
+
+            var canalAssinar = allChannels.FirstOrDefault(c => c.Id == aventuraCategory.Id 
+                                                               &&  c.Name.Equals("assinar", StringComparison.OrdinalIgnoreCase));
+            if (canalAssinar == null)
+            {
+                _logger.LogInformation("criando canal assinar");
+                canalAssinar = await guild.CreateTextChannelAsync("assinar", props => props.CategoryId = aventuraCategory.Id);
+                await canalAssinar.AddPermissionOverwriteAsync(guild.EveryoneRole,
+                    new OverwritePermissions(viewChannel: PermValue.Allow));
+            }
+            else
+            {
+                _logger.LogInformation("Canal assinar {AventuraName} ja existe", aventuraCategory.Name);
+            }
+            
             // 4. Lógica do CANAL (Mesa)
             var allChannels2 = await restGuild.GetChannelsAsync();
             var mesaChannel = allChannels2.OfType<ITextChannel>().FirstOrDefault(c =>
-                c.Name.Equals(mesaChannelName, StringComparison.OrdinalIgnoreCase) && 
+                c.Name.Equals(mesaChannelName, StringComparison.OrdinalIgnoreCase) &&
                 c.CategoryId == aventuraCategory.Id);
 
             if (mesaChannel == null)
@@ -123,14 +142,21 @@ namespace WorkerService1.Services
                 var canalVoz = await guild.CreateVoiceChannelAsync(mesaChannelName,
                     props => props.CategoryId = aventuraCategory.Id);
 
+                //permissoes de texto
+                await canalTexto.AddPermissionOverwriteAsync(guild.EveryoneRole,
+                    new OverwritePermissions(viewChannel: PermValue.Allow, sendMessages: PermValue.Deny));
                 await canalTexto.AddPermissionOverwriteAsync(playerRole,
-                    new OverwritePermissions(viewChannel: PermValue.Allow));
-                await canalVoz.AddPermissionOverwriteAsync(playerRole,
-                    new OverwritePermissions(viewChannel: PermValue.Allow));
+                    new OverwritePermissions(viewChannel: PermValue.Allow, sendMessages: PermValue.Allow));
                 await canalTexto.AddPermissionOverwriteAsync(mestreRole,
-                    new OverwritePermissions(viewChannel: PermValue.Allow));
+                    new OverwritePermissions(viewChannel: PermValue.Allow, sendMessages: PermValue.Allow));
+
+                //permssoes de voz
+                await canalVoz.AddPermissionOverwriteAsync(guild.EveryoneRole,
+                    new OverwritePermissions(viewChannel: PermValue.Allow, connect: PermValue.Deny));
+                await canalVoz.AddPermissionOverwriteAsync(playerRole,
+                    new OverwritePermissions(viewChannel: PermValue.Allow, connect: PermValue.Allow));
                 await canalVoz.AddPermissionOverwriteAsync(mestreRole,
-                    new OverwritePermissions(viewChannel: PermValue.Allow));
+                    new OverwritePermissions(viewChannel: PermValue.Allow, connect: PermValue.Allow));
             }
             else
             {
@@ -172,7 +198,7 @@ namespace WorkerService1.Services
             {
                 _logger.LogInformation("Mapeamento para o Price ID {PriceId} já existe no DB.", priceId);
             }
-            
+
             // Mapeamento do nome <-> price
             var slug = CreateSlug(product.Name);
             var existingPlanMapping = await _dbContext.PlanMappings.FindAsync(slug);
@@ -218,7 +244,8 @@ namespace WorkerService1.Services
             }
         }
 
-        public async Task DeprovisionProductInfrastructureAsync(Stripe.Product product, bool forceDeleteCategory = false)
+        public async Task DeprovisionProductInfrastructureAsync(Product product,
+            bool forceDeleteCategory = false)
         {
             _logger.LogWarning("INICIANDO PROCESSO DE DEPROVISIONAMENTO para o produto: {ProductName}", product.Name);
             _logger.LogWarning("AVISO: Esta é uma ação destrutiva e irreversível.");
@@ -246,6 +273,7 @@ namespace WorkerService1.Services
                     _logger.LogError("GuildId não configurado no appsettings.json");
                     return;
                 }
+
                 var guild = _client.GetGuild(ulong.Parse(guildId));
                 if (guild == null)
                 {
@@ -277,7 +305,9 @@ namespace WorkerService1.Services
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "Erro ao deletar canal de texto #{MesaChannelName}. Canal pode já ter sido deletado.", mesaChannelTexto.Name);
+                        _logger.LogWarning(ex,
+                            "Erro ao deletar canal de texto #{MesaChannelName}. Canal pode já ter sido deletado.",
+                            mesaChannelTexto.Name);
                     }
                 }
 
@@ -290,7 +320,9 @@ namespace WorkerService1.Services
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "Erro ao deletar canal de voz {MesaChannelName}. Canal pode já ter sido deletado.", mesaChannelVoz.Name);
+                        _logger.LogWarning(ex,
+                            "Erro ao deletar canal de voz {MesaChannelName}. Canal pode já ter sido deletado.",
+                            mesaChannelVoz.Name);
                     }
                 }
 
@@ -304,14 +336,17 @@ namespace WorkerService1.Services
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "Erro ao deletar cargo {PlayerRoleName}. Cargo pode já ter sido deletado.", playerRole.Name);
+                        _logger.LogWarning(ex,
+                            "Erro ao deletar cargo {PlayerRoleName}. Cargo pode já ter sido deletado.",
+                            playerRole.Name);
                     }
                 }
 
                 // 5. Verificar se a categoria ficou vazia e, se sim, deletá-la
                 if (aventuraCategory != null)
                 {
-                    _logger.LogInformation("Verificando se a categoria '{AventuraName}' ficou vazia...", aventuraCategory.Name);
+                    _logger.LogInformation("Verificando se a categoria '{AventuraName}' ficou vazia...",
+                        aventuraCategory.Name);
 
                     // Adicionamos uma pequena pausa para dar tempo ao cache do Discord de ser atualizado
                     // após a deleção do canal no passo anterior.
@@ -319,112 +354,158 @@ namespace WorkerService1.Services
 
                     // Buscamos a versão mais atualizada da categoria a partir do cache do servidor.
                     var updatedCategory = guild.GetCategoryChannel(aventuraCategory.Id);
-
-                    // Verificamos se a categoria ficou vazia ou se só tem canais que foram criados pelo sistema
                     if (updatedCategory != null)
                     {
                         var remainingChannels = updatedCategory.Channels.ToList();
-                        var channelsCreatedBySystem = remainingChannels.Where(c => 
-                            c.Name.Equals(mesaChannelName, StringComparison.OrdinalIgnoreCase)).ToList();
 
-                        // Se não há canais restantes OU se todos os canais restantes foram criados pelo sistema OU se forçar deleção
-                        if (!remainingChannels.Any() || remainingChannels.Count == channelsCreatedBySystem.Count || forceDeleteCategory)
+                        // --- NOVA LÓGICA ADICIONADA AQUI ---
+                        // Verifica o caso especial: o único canal restante é o #assinar?
+                        if (remainingChannels.Count == 1 &&
+                            remainingChannels.First().Name.Equals("assinar", StringComparison.OrdinalIgnoreCase) &&
+                            remainingChannels.First() is ITextChannel)
                         {
+                            _logger.LogInformation(
+                                "A categoria '{AventuraName}' contém apenas o canal #assinar. Deletando ambos...",
+                                updatedCategory.Name);
                             try
                             {
-                                if (forceDeleteCategory && remainingChannels.Any() && remainingChannels.Count != channelsCreatedBySystem.Count)
-                                {
-                                    _logger.LogWarning("FORÇANDO deleção da categoria '{AventuraName}' mesmo com {Count} canais não criados pelo sistema.", 
-                                        updatedCategory.Name, remainingChannels.Count - channelsCreatedBySystem.Count);
-                                }
-                                else
-                                {
-                                    _logger.LogInformation("A categoria '{AventuraName}' está vazia ou só contém canais do sistema. Deletando...", updatedCategory.Name);
-                                }
+                                var assinarChannel = remainingChannels.First();
+
+                                // 1. Deleta o canal #assinar
+                                await assinarChannel.DeleteAsync();
+
+                                // Pequena pausa para garantir que a deleção do canal seja processada antes de deletar a categoria
+                                await Task.Delay(500);
+
+                                // 2. Deleta a categoria agora vazia
                                 await updatedCategory.DeleteAsync();
+
+                                _logger.LogInformation(
+                                    "Canal #assinar e categoria '{AventuraName}' deletados com sucesso.",
+                                    updatedCategory.Name);
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogWarning(ex, "Erro ao deletar categoria '{AventuraName}'. Categoria pode já ter sido deletada.", updatedCategory.Name);
+                                _logger.LogError(ex, "Erro ao deletar o canal #assinar e a categoria '{AventuraName}'.",
+                                    updatedCategory.Name);
                             }
                         }
                         else
                         {
-                            _logger.LogInformation("A categoria '{AventuraName}' contém {Count} canais que não foram criados pelo sistema e não será deletada.", 
-                                updatedCategory.Name, remainingChannels.Count - channelsCreatedBySystem.Count);
+                            var channelsCreatedBySystem = remainingChannels.Where(c =>
+                                c.Name.Equals(mesaChannelName, StringComparison.OrdinalIgnoreCase)).ToList();
+
+                            // Se não há canais restantes OU se todos os canais restantes foram criados pelo sistema OU se forçar deleção
+                            if (!remainingChannels.Any() || remainingChannels.Count == channelsCreatedBySystem.Count ||
+                                forceDeleteCategory)
+                            {
+                                try
+                                {
+                                    if (forceDeleteCategory && remainingChannels.Any() &&
+                                        remainingChannels.Count != channelsCreatedBySystem.Count)
+                                    {
+                                        _logger.LogWarning(
+                                            "FORÇANDO deleção da categoria '{AventuraName}' mesmo com {Count} canais não criados pelo sistema.",
+                                            updatedCategory.Name,
+                                            remainingChannels.Count - channelsCreatedBySystem.Count);
+                                    }
+                                    else
+                                    {
+                                        _logger.LogInformation(
+                                            "A categoria '{AventuraName}' está vazia ou só contém canais do sistema. Deletando...",
+                                            updatedCategory.Name);
+                                    }
+
+                                    await updatedCategory.DeleteAsync();
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning(ex,
+                                        "Erro ao deletar categoria '{AventuraName}'. Categoria pode já ter sido deletada.",
+                                        updatedCategory.Name);
+                                }
+                            }
+                            else
+                            {
+                                _logger.LogInformation(
+                                    "A categoria '{AventuraName}' contém {Count} canais que não foram criados pelo sistema e não será deletada.",
+                                    updatedCategory.Name, remainingChannels.Count - channelsCreatedBySystem.Count);
+                            }
                         }
                     }
-                }
 
-                // 6. Remover os mapeamentos do banco de dados
-                // Buscar todos os preços associados ao produto
-                var prices = await GetProductPricesAsync(product.Id);
-                foreach (var price in prices)
-                {
-                    var roleMapping = await _dbContext.PlanRoleMappings.FindAsync(price.Id);
-                    if (roleMapping != null)
+                    // 6. Remover os mapeamentos do banco de dados
+                    // Buscar todos os preços associados ao produto
+                    var prices = await GetProductPricesAsync(product.Id);
+                    foreach (var price in prices)
                     {
-                        _dbContext.PlanRoleMappings.Remove(roleMapping);
-                        _logger.LogInformation("Mapeamento de Cargo (Price ID {PriceId}) removido do DB.", price.Id);
+                        var roleMapping = await _dbContext.PlanRoleMappings.FindAsync(price.Id);
+                        if (roleMapping != null)
+                        {
+                            _dbContext.PlanRoleMappings.Remove(roleMapping);
+                            _logger.LogInformation("Mapeamento de Cargo (Price ID {PriceId}) removido do DB.",
+                                price.Id);
+                        }
                     }
+
+                    // Remover mapeamento de plano pelo slug
+                    var slug = CreateSlug(product.Name);
+                    var planMapping = await _dbContext.PlanMappings.FindAsync(slug);
+                    if (planMapping != null)
+                    {
+                        _dbContext.PlanMappings.Remove(planMapping);
+                        _logger.LogInformation("Mapeamento de Plano (Slug '{Slug}') removido do DB.", slug);
+                    }
+
+                    await _dbContext.SaveChangesAsync();
+
+                    _logger.LogWarning("PROCESSO DE DEPROVISIONAMENTO CONCLUÍDO para o produto: {ProductName}",
+                        product.Name);
                 }
-
-                // Remover mapeamento de plano pelo slug
-                var slug = CreateSlug(product.Name);
-                var planMapping = await _dbContext.PlanMappings.FindAsync(slug);
-                if (planMapping != null)
-                {
-                    _dbContext.PlanMappings.Remove(planMapping);
-                    _logger.LogInformation("Mapeamento de Plano (Slug '{Slug}') removido do DB.", slug);
-                }
-
-                await _dbContext.SaveChangesAsync();
-
-                _logger.LogWarning("PROCESSO DE DEPROVISIONAMENTO CONCLUÍDO para o produto: {ProductName}",
-                    product.Name);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex,
-                    "Ocorreu um erro durante o deprovisionamento da infraestrutura do produto {ProductId}", product.Id);
+                    "Ocorreu um erro durante o deprovisionamento da infraestrutura do produto {ProductId}",
+                    product.Id);
             }
         }
-        
-        
+
+
         // Método auxiliar para criar um nome amigável (slug)
-        private string CreateSlug(string input)
-        {
-            if (string.IsNullOrEmpty(input)) return string.Empty;
-            var nowhitespace = Regex.Replace(input.ToLower(), @"\s+", "-");
-            var slug = Regex.Replace(nowhitespace, @"[^a-z0-9_-]", "");
-            return slug;
-        }
-
-        // Método para buscar preços de um produto específico
-        private async Task<List<Price>> GetProductPricesAsync(string productId)
-        {
-            try
+            private string CreateSlug(string input)
             {
-                var options = new PriceListOptions
-                {
-                    Product = productId,
-                    Active = true,
-                    Limit = 100
-                };
-
-                var priceService = new PriceService();
-                var prices = await priceService.ListAsync(options);
-
-                _logger.LogInformation("Encontrados {Count} preços ativos para o produto {ProductId}",
-                    prices.Data.Count, productId);
-
-                return prices.Data.ToList();
+                if (string.IsNullOrEmpty(input)) return string.Empty;
+                var nowhitespace = Regex.Replace(input.ToLower(), @"\s+", "-");
+                var slug = Regex.Replace(nowhitespace, @"[^a-z0-9_-]", "");
+                return slug;
             }
-            catch (Exception ex)
+
+            // Método para buscar preços de um produto específico
+            private async Task<List<Price>> GetProductPricesAsync(string productId)
             {
-                _logger.LogError(ex, "Erro ao buscar preços para o produto {ProductId}", productId);
-                return new List<Price>();
+                try
+                {
+                    var options = new PriceListOptions
+                    {
+                        Product = productId,
+                        Active = true,
+                        Limit = 100
+                    };
+
+                    var priceService = new PriceService();
+                    var prices = await priceService.ListAsync(options);
+
+                    _logger.LogInformation("Encontrados {Count} preços ativos para o produto {ProductId}",
+                        prices.Data.Count, productId);
+
+                    return prices.Data.ToList();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Erro ao buscar preços para o produto {ProductId}", productId);
+                    return new List<Price>();
+                }
             }
         }
     }
-}

@@ -108,23 +108,6 @@ namespace WorkerService1.Services
                 _logger.LogInformation("Permissões da categoria '{AventuraName}' configuradas.",
                     aventuraName);
             }
-
-            // 3.5. Canal de assinatura
-
-
-            var canalAssinar = allChannels.FirstOrDefault(c => c.Id == aventuraCategory.Id 
-                                                               &&  c.Name.Equals("assinar", StringComparison.OrdinalIgnoreCase));
-            if (canalAssinar == null)
-            {
-                _logger.LogInformation("criando canal assinar");
-                canalAssinar = await guild.CreateTextChannelAsync("assinar", props => props.CategoryId = aventuraCategory.Id);
-                await canalAssinar.AddPermissionOverwriteAsync(guild.EveryoneRole,
-                    new OverwritePermissions(viewChannel: PermValue.Allow));
-            }
-            else
-            {
-                _logger.LogInformation("Canal assinar {AventuraName} ja existe", aventuraCategory.Name);
-            }
             
             // 4. Lógica do CANAL (Mesa)
             var allChannels2 = await restGuild.GetChannelsAsync();
@@ -137,10 +120,20 @@ namespace WorkerService1.Services
                 _logger.LogInformation(
                     "Canal '{MesaChannelName}' não encontrado. Criando dentro da categoria '{AventuraName}'...",
                     mesaChannelName, aventuraCategory.Name);
+                var canalAssinar = await guild.CreateTextChannelAsync("assinar-" + mesaChannelName,
+                    props => props.CategoryId = aventuraCategory.Id);
                 var canalTexto = await guild.CreateTextChannelAsync(mesaChannelName,
                     props => props.CategoryId = aventuraCategory.Id);
                 var canalVoz = await guild.CreateVoiceChannelAsync(mesaChannelName,
-                    props => props.CategoryId = aventuraCategory.Id);
+                    props =>
+                    {
+                        props.CategoryId = aventuraCategory.Id;
+                        props.Position = canalTexto.Position;
+                    });
+                
+                //permissoes assinar
+                await canalAssinar.AddPermissionOverwriteAsync(guild.EveryoneRole,
+                    new OverwritePermissions(viewChannel: PermValue.Allow, sendMessages: PermValue.Allow));
 
                 //permissoes de texto
                 await canalTexto.AddPermissionOverwriteAsync(guild.EveryoneRole,
@@ -254,9 +247,10 @@ namespace WorkerService1.Services
             {
                 // 1. Extrair os metadados do produto deletado para saber o que apagar
                 product.Metadata.TryGetValue("aventura", out var aventuraName);
-                product.Metadata.TryGetValue("mesa", out var mesaChannelName);
+                product.Metadata.TryGetValue("mestre-mesa-n-dia-periodo", out var mesaChannelName);
                 product.Metadata.TryGetValue("cargo",
                     out var playerRoleName); // Usamos o mesmo nome do cargo que foi criado
+                var assinarChannelName = "assinar-" + mesaChannelName; 
 
                 if (string.IsNullOrEmpty(aventuraName) || string.IsNullOrEmpty(mesaChannelName) ||
                     string.IsNullOrEmpty(playerRoleName))
@@ -288,6 +282,8 @@ namespace WorkerService1.Services
                     r.Name.Equals(playerRoleName, StringComparison.OrdinalIgnoreCase));
 
                 // Encontra o canal de texto E o de voz (se existirem)
+                var assinarChannel = guild.Channels.FirstOrDefault(c =>
+                    c.Name.Equals(assinarChannelName, StringComparison.OrdinalIgnoreCase));
                 var mesaChannelTexto = guild.TextChannels.FirstOrDefault(c =>
                     c.Name.Equals(mesaChannelName, StringComparison.OrdinalIgnoreCase) &&
                     c.CategoryId == aventuraCategory?.Id);
@@ -296,6 +292,20 @@ namespace WorkerService1.Services
                     c.CategoryId == aventuraCategory?.Id);
 
                 // 3. Deletar os canais da mesa (se existirem)
+                if (assinarChannel != null)
+                {
+                    try
+                    {
+                        _logger.LogInformation("Deletando canal de assinatura #{assinarChannel}.", assinarChannel.Name);
+                        await assinarChannel.DeleteAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, 
+                            "Erro ao deletar canal de assinatura #{assinarChannel}.", assinarChannel.Name);
+                    }
+                }
+                
                 if (mesaChannelTexto != null)
                 {
                     try
@@ -357,40 +367,8 @@ namespace WorkerService1.Services
                     if (updatedCategory != null)
                     {
                         var remainingChannels = updatedCategory.Channels.ToList();
-
-                        // --- NOVA LÓGICA ADICIONADA AQUI ---
-                        // Verifica o caso especial: o único canal restante é o #assinar?
-                        if (remainingChannels.Count == 1 &&
-                            remainingChannels.First().Name.Equals("assinar", StringComparison.OrdinalIgnoreCase) &&
-                            remainingChannels.First() is ITextChannel)
-                        {
-                            _logger.LogInformation(
-                                "A categoria '{AventuraName}' contém apenas o canal #assinar. Deletando ambos...",
-                                updatedCategory.Name);
-                            try
-                            {
-                                var assinarChannel = remainingChannels.First();
-
-                                // 1. Deleta o canal #assinar
-                                await assinarChannel.DeleteAsync();
-
-                                // Pequena pausa para garantir que a deleção do canal seja processada antes de deletar a categoria
-                                await Task.Delay(500);
-
-                                // 2. Deleta a categoria agora vazia
-                                await updatedCategory.DeleteAsync();
-
-                                _logger.LogInformation(
-                                    "Canal #assinar e categoria '{AventuraName}' deletados com sucesso.",
-                                    updatedCategory.Name);
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogError(ex, "Erro ao deletar o canal #assinar e a categoria '{AventuraName}'.",
-                                    updatedCategory.Name);
-                            }
-                        }
-                        else
+                        
+                        if(remainingChannels.Count > 0)
                         {
                             var channelsCreatedBySystem = remainingChannels.Where(c =>
                                 c.Name.Equals(mesaChannelName, StringComparison.OrdinalIgnoreCase)).ToList();

@@ -22,6 +22,8 @@
 # Nunca adicione arquivos de banco de dados ao Git!
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
 
 # 2. ARQUIVO DE SEGREDOS (.env)
 # CRÍTICO: Nunca adicione seus tokens e chaves secretas ao Git!

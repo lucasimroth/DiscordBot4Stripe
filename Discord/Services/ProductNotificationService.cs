@@ -72,13 +72,13 @@ namespace WorkerService1.Discord.Services
                 await _discordInfraService.DeprovisionProductInfrastructureAsync(product);
         
                 // 2. DEPOIS, inicia a espera para a notificação de "arquivado".
-                await StartDelayedNotification(product, "archived", TimeSpan.FromSeconds(5), _pendingUpdates);
+                await StartDelayedNotification(product, "archived", TimeSpan.FromSeconds(30), _pendingUpdates);
             }
             else
             {
                 // Se ele continua ativo, foi uma atualização genérica (nome, etc.).
                 // Apenas inicia a espera para a notificação de "atualizado".
-                await StartDelayedNotification(product, "updated", TimeSpan.FromSeconds(5), _pendingUpdates);
+                await StartDelayedNotification(product, "updated", TimeSpan.FromSeconds(30), _pendingUpdates);
             }
         }
 

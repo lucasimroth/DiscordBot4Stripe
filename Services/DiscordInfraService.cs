@@ -2,6 +2,7 @@ using Discord;
 using Discord.WebSocket;
 using WorkerService1.Data;
 using System.Text.RegularExpressions;
+using Microsoft.EntityFrameworkCore;
 using Stripe;
 
 namespace WorkerService1.Services
@@ -91,8 +92,8 @@ namespace WorkerService1.Services
                 // 1. Cria a categoria e guarda a resposta da API (um RestCategoryChannel)
                 var newRestCategory = await guild.CreateCategoryChannelAsync(aventuraName);
 
-                // 2. Usa o ID da nova categoria para pegar o objeto 'Socket' completo do cache
-                aventuraCategory = guild.GetCategoryChannel(newRestCategory.Id);
+                // 2. Usa o ID da nova categoria para pegar o objeto 'Socket' completo do cache(corrigido, pega direto para evitar ghost channel)
+                aventuraCategory = newRestCategory;
 
                 // 3. AGORA, com o objeto do tipo correto, modificamos as permissões
                 _logger.LogInformation("Configurando permissões da categoria '{AventuraName}'...", aventuraName);
@@ -114,19 +115,31 @@ namespace WorkerService1.Services
             var mesaChannel = allChannels2.OfType<ITextChannel>().FirstOrDefault(c =>
                 c.Name.Equals(mesaChannelName, StringComparison.OrdinalIgnoreCase) &&
                 c.CategoryId == aventuraCategory.Id);
-
+            var assinarChannelName = "assinar-" + mesaChannelName;
+            if (assinarChannelName.Length > 100) assinarChannelName = assinarChannelName.Substring(0, 100);
+            ITextChannel canalAssinar = null;
+                
             if (mesaChannel == null)
             {
                 _logger.LogInformation(
                     "Canal '{MesaChannelName}' não encontrado. Criando dentro da categoria '{AventuraName}'...",
                     mesaChannelName, aventuraCategory.Name);
-                var canalAssinar = await guild.CreateTextChannelAsync("assinar-" + mesaChannelName,
-                    props => props.CategoryId = aventuraCategory.Id);
-                var canalTexto = await guild.CreateTextChannelAsync(mesaChannelName,
-                    props => props.CategoryId = aventuraCategory.Id);
+                
                 var canalVoz = await guild.CreateVoiceChannelAsync(mesaChannelName,
+                                    props =>
+                                    {
+                                        props.CategoryId = aventuraCategory.Id;
+                                    });
+                
+                var canalTexto = await guild.CreateTextChannelAsync(mesaChannelName,
                     props =>
                     {
+                        props.CategoryId = aventuraCategory.Id;
+                        props.Position = canalVoz.Position;
+                    });
+                
+                canalAssinar = await guild.CreateTextChannelAsync(assinarChannelName,
+                    props => {
                         props.CategoryId = aventuraCategory.Id;
                         props.Position = canalTexto.Position;
                     });
@@ -209,6 +222,22 @@ namespace WorkerService1.Services
             else
             {
                 _logger.LogInformation("Mapeamento de Plano para o Slug '{Slug}' já existe no DB.", slug);
+            }
+            
+            // NOVO MAPEAMENTO: Channel <-> Price
+            var existingChannelMapping = await _dbContext.ChannelProductMappings.FindAsync(canalAssinar.Id);
+            if (existingChannelMapping == null)
+            {
+                _dbContext.ChannelProductMappings.Add(new ChannelProductMapping
+                {
+                    DiscordChannelId = canalAssinar.Id,
+                    StripePriceId = priceId
+                });
+                _logger.LogInformation("Mapeamento de Canal adicionado: Channel ID {ChannelId} -> Price ID {PriceId}", canalAssinar.Id, priceId);
+            }
+            else
+            {
+                _logger.LogInformation("Mapeamento de Canal para o Channel ID {ChannelId} já existe no DB.", canalAssinar.Id);
             }
 
             // Salvar todas as mudanças de uma vez só
@@ -425,6 +454,21 @@ namespace WorkerService1.Services
                                 price.Id);
                         }
                     }
+                    
+                    // Remover mapeamento de canal
+                    foreach (var price in prices)
+                    {
+                        // Precisamos encontrar o canal pelo PriceId
+                        var channelMapping = await _dbContext.ChannelProductMappings
+                            .FirstOrDefaultAsync(cm => cm.StripePriceId == price.Id);
+                        if (channelMapping != null)
+                        {
+                            _dbContext.ChannelProductMappings.Remove(channelMapping);
+                            _logger.LogInformation("Mapeamento de Canal (Channel ID {ChannelId}) removido do DB.", channelMapping.DiscordChannelId);
+                        }
+                    }
+
+                    await _dbContext.SaveChangesAsync();
 
                     // Remover mapeamento de plano pelo slug
                     var slug = CreateSlug(product.Name);

@@ -18,12 +18,22 @@ namespace WorkerService1.Data
         public DbSet<UserSubscription> UserSubscriptions { get; set; }
         public DbSet<PlanRoleMapping> PlanRoleMappings { get; set; }
         public DbSet<PlanMapping> PlanMappings { get; set; }
+        
+        public DbSet<ChannelProductMapping> ChannelProductMappings { get; set; }
 
     
         public SubscriptionDbContext(DbContextOptions<SubscriptionDbContext> options)
             : base(options)
         {
         }
+    }
+    
+    public class ChannelProductMapping
+    {
+        [Key]
+        public ulong DiscordChannelId { get; set; }
+
+        public string StripePriceId { get; set; } = string.Empty;
     }
     
     public class PlanRoleMapping

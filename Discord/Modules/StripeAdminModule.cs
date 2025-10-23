@@ -2,6 +2,8 @@ using Discord;
 using Discord.Interactions;
 using System.Text;
 using WorkerService1.Discord.Services; // Importa o StripeService
+using WorkerService1.Data;
+using Microsoft.EntityFrameworkCore;
 
 namespace WorkerService1.Discord.Modules
 {
@@ -13,14 +15,54 @@ namespace WorkerService1.Discord.Modules
 
         // Você também precisará do IConfiguration se o GetPlanMappingName estiver no StripeService
         private readonly IConfiguration _configuration;
+        private readonly SubscriptionDbContext _dbContext;
 
 
         public StripeAdminModule(ILogger<StripeAdminModule> logger, StripeService stripeService,
-            IConfiguration configuration)
+            IConfiguration configuration, SubscriptionDbContext dbContext)
         {
             _logger = logger;
             _stripeService = stripeService;
             _configuration = configuration;
+            _dbContext = dbContext;
+        }
+
+        [SlashCommand("cancelar-assinatura", "Cancela a assinatura ativa do usuário.")]
+        public async Task CancelarAssinatura()
+        {
+            await DeferAsync(ephemeral: true);
+
+            try
+            {
+                var discordUserId = Context.User.Id;
+                
+                // Buscar assinatura ativa do usuário no banco de dados
+                var userSubscription = await _dbContext.UserSubscriptions
+                    .FirstOrDefaultAsync(s => s.DiscordUserId == discordUserId);
+
+                if (userSubscription == null)
+                {
+                    await FollowupAsync("❌ Você não possui nenhuma assinatura ativa para cancelar.", ephemeral: true);
+                    return;
+                }
+
+                // Cancelar assinatura no Stripe
+                var cancelado = await _stripeService.CancelSubscriptionAsync(userSubscription.StripeSubscriptionId);
+                
+                if (cancelado)
+                {
+                    await FollowupAsync("✅ Sua assinatura foi cancelada com sucesso! O cargo será removido automaticamente.", ephemeral: true);
+                }
+                else
+                {
+                    await FollowupAsync("❌ Erro ao cancelar a assinatura. Tente novamente ou entre em contato com o suporte.", ephemeral: true);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Erro ao executar o comando /cancelar-assinatura.");
+                await FollowupAsync("❌ Ocorreu um erro ao cancelar a assinatura. Verifique os logs.", ephemeral: true);
+            }
         }
 
         [SlashCommand("listar-planos", "Lista todos os planos ativos do Stripe em um canal.")]

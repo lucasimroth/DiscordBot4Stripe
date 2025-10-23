@@ -80,5 +80,24 @@ namespace WorkerService1.Discord.Services
             _logger.LogInformation("{Count} planos ativos encontrados.", prices.Data.Count);
             return prices.Data.ToList();
         }
+
+        public async Task<bool> CancelSubscriptionAsync(string subscriptionId)
+        {
+            try
+            {
+                _logger.LogInformation($"Cancelando assinatura {subscriptionId}...");
+                
+                var subscriptionService = new Stripe.SubscriptionService();
+                var subscription = await subscriptionService.CancelAsync(subscriptionId);
+                
+                _logger.LogInformation($"Assinatura {subscriptionId} cancelada com sucesso. Status: {subscription.Status}");
+                return true;
+            }
+            catch (StripeException ex)
+            {
+                _logger.LogError(ex, "Erro ao cancelar assinatura {SubscriptionId} via Stripe API", subscriptionId);
+                return false;
+            }
+        }
     }
 }

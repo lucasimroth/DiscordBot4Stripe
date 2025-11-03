@@ -96,6 +96,20 @@ namespace WorkerService1.Discord.Services
 
         public async Task HandleSubscriptionDeleted(Subscription subscription)
         {
+            // Logar informações sobre o motivo do cancelamento
+            var cancellationReason = DetermineCancellationReason(subscription);
+            _logger.LogInformation($"Assinatura {subscription.Id} foi deletada. Motivo: {cancellationReason}");
+            
+            if (subscription.CanceledAt.HasValue)
+            {
+                _logger.LogInformation($"Cancelada em: {subscription.CanceledAt.Value:yyyy-MM-dd HH:mm:ss}");
+            }
+            
+            if (subscription.CancellationDetails != null)
+            {
+                _logger.LogInformation($"Detalhes do cancelamento - Reason: {subscription.CancellationDetails.Reason}, Comment: {subscription.CancellationDetails.Comment}");
+            }
+            
             // Toda a sua lógica original de HandleSubscriptionDeleted está aqui
             var userSubscription = await _dbContext.UserSubscriptions
                 .FirstOrDefaultAsync(s => s.StripeSubscriptionId == subscription.Id);
@@ -143,6 +157,46 @@ namespace WorkerService1.Discord.Services
             {
                 _logger.LogError(ex, $"Erro ao remover assinatura {subscription.Id} do banco de dados.");
             }
+        }
+
+        private string DetermineCancellationReason(Subscription subscription)
+        {
+            // Verificar se foi cancelada no fim do período
+            if (subscription.CancelAtPeriodEnd == true)
+            {
+                return "Cancelada no fim do período (cancel_at_period_end)";
+            }
+
+            // Verificar se foi cancelada imediatamente
+            if (subscription.CanceledAt.HasValue)
+            {
+                // Verificar se há detalhes de cancelamento
+                if (subscription.CancellationDetails != null)
+                {
+                    var reason = subscription.CancellationDetails.Reason;
+                    return reason switch
+                    {
+                        "cancellation_requested" => "Cancelamento solicitado pelo cliente",
+                        "payment_failed" => "Cancelada devido a falha de pagamento",
+                        "fraudulent" => "Cancelada devido a atividade fraudulenta",
+                        "subscription_pause_expired" => "Cancelada após expiração de pausa",
+                        "subscription_canceled" => "Cancelada (cancelamento geral)",
+                        _ => $"Cancelada - Razão: {reason}"
+                    };
+                }
+                return "Cancelada imediatamente (sem detalhes específicos)";
+            }
+
+            // Verificar status da assinatura
+            return subscription.Status switch
+            {
+                "canceled" => "Status: Cancelada",
+                "past_due" => "Status: Pagamento em atraso (expirou)",
+                "unpaid" => "Status: Não paga (expirou)",
+                "incomplete" => "Status: Incompleta",
+                "incomplete_expired" => "Status: Incompleta e expirada",
+                _ => $"Status: {subscription.Status}"
+            };
         }
     }
 }

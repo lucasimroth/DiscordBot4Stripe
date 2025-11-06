@@ -17,9 +17,25 @@ var builder = WebApplication.CreateBuilder(args);
 //Injeção de dependencias
 StripeConfiguration.ApiKey = builder.Configuration["Stripe:SecretKey"];
 builder.Services.AddControllers();
-builder.Services.AddDbContext<SubscriptionDbContext>(options => options.UseSqlite("Data Source=subscriptions.db"));
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+// Lê a string de conexão do ambiente (que o Render vai fornecer)
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+
+if (!string.IsNullOrEmpty(connectionString))
+{
+    // Usa PostgreSQL se a string de conexão for encontrada (Ambiente de Produção/Render)
+    builder.Services.AddDbContext<SubscriptionDbContext>(options =>
+        options.UseNpgsql(connectionString)
+    );
+}
+else
+{
+    // Mantém o SQLite se nenhuma string for encontrada (Ambiente de Desenvolvimento Local)
+    builder.Services.AddDbContext<SubscriptionDbContext>(options =>
+        options.UseSqlite("Data Source=subscriptions.db")
+    );
+}
 
 
 //servicos discord bot
